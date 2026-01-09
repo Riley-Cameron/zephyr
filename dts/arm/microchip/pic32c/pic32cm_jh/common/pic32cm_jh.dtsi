@@ -149,6 +149,18 @@
 			clock-names = "mclk", "gclk";
 			status = "disabled";
 		};
+
+		dmac: dmac@41006000 {
+        	status = "okay";
+			compatible = "microchip,dmac-g1-dma";
+			reg = <0x41006000 0x50>;
+			interrupts = <7 0>;
+			clocks = <&mclkperiph CLOCK_MCHP_MCLKPERIPH_ID_AHB_DMAC>;
+			clock-names = "mclk";
+			dma-channels = <12>;
+			dma-alignment = <16>;
+			#dma-cells = <2>;
+		};
 	};
 };
 

@@ -35,6 +35,27 @@ LOG_MODULE_REGISTER(dma_mchp_dmac_g1, CONFIG_DMA_LOG_LEVEL);
 #define TIMEOUT_VALUE_US 1000
 #define DELAY_US         2
 
+/* Macros to handle PIC32CM vs SAM Register Layout */
+#ifdef CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH
+/* PIC32CM register layout needs to select the correct channel to access its registers */
+#define DMAC_CH_SELECT(dr,ch)        ((dr)->DMAC_CHID = (ch))
+#define DMAC_CHCTRLA(dr,ch)          ((dr)->DMAC_CHCTRLA)
+#define DMAC_CHCTRLB(dr,ch)          ((dr)->DMAC_CHCTRLB)
+#define DMAC_CHINTFLAG(dr,ch)        ((dr)->DMAC_CHINTFLAG)
+#define DMAC_CHINTENSET(dr,ch)       ((dr)->DMAC_CHINTENSET)
+#define DMAC_CHINTENCLR(dr,ch)       ((dr)->DMAC_CHINTENCLR)
+#define DMAC_CHSTATUS(dr,ch)       	 ((dr)->DMAC_CHSTATUS)
+#else
+/* SAM register layout can utilize channel indexing */
+#define DMAC_CH_SELECT(dr,ch)        (do {} while (0))
+#define DMAC_CHCTRLA(dr,ch)          ((dr)->CHANNEL[ch].DMAC_CHCTRLA)
+#define DMAC_CHCTRLB(dr,ch)          ((dr)->CHANNEL[ch].DMAC_CHCTRLB)
+#define DMAC_CHINTFLAG(dr,ch)        ((dr)->CHANNEL[ch].DMAC_CHINTFLAG)
+#define DMAC_CHINTENSET(dr,ch)       ((dr)->CHANNEL[ch].DMAC_CHINTENSET)
+#define DMAC_CHINTENCLR(dr,ch)       ((dr)->CHANNEL[ch].DMAC_CHINTENCLR)
+#define DMAC_CHSTATUS(dr,ch)       	 ((dr)->CHANNEL[ch].DMAC_CHSTATUS)
+#endif /* CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH */
+
 enum dma_mchp_int_sts {
 	DMA_MCHP_INT_ERROR = -1,
 	DMA_MCHP_INT_SUCCESS = 0,
@@ -154,15 +175,31 @@ static int8_t dmac_ch_set_trig_src_n_dir(dmac_registers_t *dmac_reg, uint8_t cha
 
 	if (channel_direction == MEMORY_TO_MEMORY) {
 		/* A single software trigger will start the transfer */
+#if CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH
+		dmac_reg->DMAC_CHID = channel;
+		dmac_reg->DMAC_CHCTRLB = 
+			(dmac_reg->DMAC_CHCTRLB &
+			~(DMAC_CHCTRLB_TRIGACT_Msk | DMAC_CHCTRLB_TRIGSRC_Msk)) |
+			DMAC_CHCTRLB_TRIGACT_TRANSACTION |
+			DMAC_CHCTRLB_TRIGSRC(trig_src);
+#else
 		dmac_reg->CHANNEL[channel].DMAC_CHCTRLA =
 			DMAC_CHCTRLA_TRIGACT_TRANSACTION | DMAC_CHCTRLA_TRIGSRC(trig_src);
-
+#endif /* CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH */
 	} else if ((channel_direction == MEMORY_TO_PERIPHERAL) ||
 		   (channel_direction == PERIPHERAL_TO_MEMORY)) {
 		/* One peripheral trigger per beat */
+#if CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH
+		dmac_reg->DMAC_CHID = channel;
+		dmac_reg->DMAC_CHCTRLB =
+			(dmac_reg->DMAC_CHCTRLB &
+			~(DMAC_CHCTRLB_TRIGACT_Msk | DMAC_CHCTRLB_TRIGSRC_Msk)) |
+			DMAC_CHCTRLB_TRIGACT_BEAT |
+			DMAC_CHCTRLB_TRIGSRC(trig_src);
+#else
 		dmac_reg->CHANNEL[channel].DMAC_CHCTRLA =
 			DMAC_CHCTRLA_TRIGACT_BURST | DMAC_CHCTRLA_TRIGSRC(trig_src);
-
+#endif /* CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH */
 	} else {
 		LOG_ERR("Invalid parameter for DMA channel direction");
 		return -EINVAL;
@@ -179,7 +216,14 @@ static inline int8_t dmac_ch_set_priority(dmac_registers_t *dmac_reg, uint8_t ch
 		return -EINVAL;
 	}
 
+#if CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH
+	dmac_reg->DMAC_CHID = channel;
+	dmac_reg->DMAC_CHCTRLB =
+		(dmac_reg->DMAC_CHCTRLB & ~DMAC_CHCTRLB_LVL_Msk) |
+		DMAC_CHCTRLB_LVL(priority);
+#else
 	dmac_reg->CHANNEL[channel].DMAC_CHPRILVL = DMAC_CHPRILVL_PRILVL(priority);
+#endif /* CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH */
 
 	return 0;
 }
@@ -200,8 +244,12 @@ static int8_t dmac_ch_set_burst_length(dmac_registers_t *dmac_reg, uint8_t chann
 	}
 
 	if (source_burst_length > 0U) {
+#if CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH
+		ARG_UNUSED(source_burst_length);
+#else
 		dmac_reg->CHANNEL[channel].DMAC_CHCTRLA |=
 			DMAC_CHCTRLA_BURSTLEN(source_burst_length - 1U);
+#endif /* CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH */
 	}
 
 	return 0;
@@ -211,54 +259,66 @@ static void dmac_ch_interrupt_enable(dmac_registers_t *dmac_reg, uint8_t channel
 				     bool disable_err_interrupt)
 {
 	/* Enable transfer complete interrupt */
-	dmac_reg->CHANNEL[channel].DMAC_CHINTENSET = DMAC_CHINTENSET_TCMPL(1);
+	DMAC_CH_SELECT(dmac_reg,channel);
+	DMAC_CHINTENSET(dmac_reg,channel) = DMAC_CHINTENSET_TCMPL(1);
 
 	/* Enable or disable transfer error interrupt based on flag */
 	if (disable_err_interrupt == false) {
-		dmac_reg->CHANNEL[channel].DMAC_CHINTENSET = DMAC_CHINTENSET_TERR(1);
+		DMAC_CHINTENSET(dmac_reg,channel) = DMAC_CHINTENSET_TERR(1);
 	} else {
-		dmac_reg->CHANNEL[channel].DMAC_CHINTENCLR = DMAC_CHINTENSET_TERR(1);
+		DMAC_CHINTENCLR(dmac_reg,channel) = DMAC_CHINTENSET_TERR(1);
 	}
 
 	/* Clear any pending interrupt flags */
-	dmac_reg->CHANNEL[channel].DMAC_CHINTFLAG =
+	DMAC_CHINTFLAG(dmac_reg,channel) = 
 		DMAC_CHINTFLAG_TERR_Msk | DMAC_CHINTFLAG_TCMPL_Msk;
 }
 
 static inline void dmac_ch_enable(dmac_registers_t *dmac_reg, uint8_t channel)
-{
-	dmac_reg->CHANNEL[channel].DMAC_CHCTRLA |= DMAC_CHCTRLA_ENABLE(1);
-	if ((DMAC_CHCTRLA_TRIGSRC_Msk & dmac_reg->CHANNEL[channel].DMAC_CHCTRLA) == 0) {
+{	
+	DMAC_CH_SELECT(dmac_reg,channel);
+	DMAC_CHCTRLA(dmac_reg,channel) |= DMAC_CHCTRLA_ENABLE(1);
+
+	bool sw_trig;
+#if CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH
+	sw_trig = ((dmac_reg->DMAC_CHCTRLB & DMAC_CHCTRLB_TRIGSRC_Msk) == 0);
+#else
+	sw_trig = ((DMAC_CHCTRLA_TRIGSRC_Msk & dmac_reg->CHANNEL[channel].DMAC_CHCTRLA) == 0);
+#endif /* CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH */
+
+	if (sw_trig) {
 		/* Trigger via software */
-		dmac_reg->DMAC_SWTRIGCTRL = BIT(channel);
+		dmac_reg->DMAC_SWTRIGCTRL |= BIT(channel);
 	}
 }
 
 static inline void dmac_ch_disable(dmac_registers_t *dmac_reg, uint8_t channel)
 {
-	dmac_reg->CHANNEL[channel].DMAC_CHCTRLA &= ~DMAC_CHCTRLA_ENABLE(1);
+	DMAC_CH_SELECT(dmac_reg,channel);
+	DMAC_CHCTRLA(dmac_reg,channel) &= ~DMAC_CHCTRLA_ENABLE(1);
 }
 
 static inline void dmac_ch_suspend(dmac_registers_t *dmac_reg, uint8_t channel)
 {
-
-	uint32_t chctrlb = dmac_reg->CHANNEL[channel].DMAC_CHCTRLB;
+	DMAC_CH_SELECT(dmac_reg,channel);
+	uint32_t chctrlb = DMAC_CHCTRLB(dmac_reg,channel);
 
 	chctrlb &= ~DMAC_CHCTRLB_CMD_Msk;
 	chctrlb |= DMAC_CHCTRLB_CMD_SUSPEND;
-	dmac_reg->CHANNEL[channel].DMAC_CHCTRLB = chctrlb;
+	DMAC_CHCTRLB(dmac_reg,channel) = chctrlb;
 }
 
 static inline void dmac_ch_resume(dmac_registers_t *dmac_reg, uint8_t channel)
 {
-	uint32_t chctrlb = dmac_reg->CHANNEL[channel].DMAC_CHCTRLB;
+	DMAC_CH_SELECT(dmac_reg,channel);
+	uint32_t chctrlb = DMAC_CHCTRLB(dmac_reg,channel);
 
 	chctrlb &= ~DMAC_CHCTRLB_CMD_Msk;
 	chctrlb |= DMAC_CHCTRLB_CMD_RESUME;
-	dmac_reg->CHANNEL[channel].DMAC_CHCTRLB = chctrlb;
+	DMAC_CHCTRLB(dmac_reg,channel) = chctrlb;
 
 	/* Clear the SUSPEND Interrupt Flag */
-	dmac_reg->CHANNEL[channel].DMAC_CHINTFLAG |= DMAC_CHINTFLAG_SUSP(1);
+	DMAC_CHINTFLAG(dmac_reg,channel) |= DMAC_CHINTFLAG_SUSP(1);
 }
 
 static enum dma_mchp_ch_state dmac_ch_get_state(dmac_registers_t *dmac_reg, uint32_t channel)
@@ -267,9 +327,11 @@ static enum dma_mchp_ch_state dmac_ch_get_state(dmac_registers_t *dmac_reg, uint
 	uint32_t active_status;
 	uint8_t ch_int_flag, ch_status;
 
+	DMAC_CH_SELECT(dmac_reg,channel);
+
 	/* Read channel status and interrupt flag */
-	ch_status = dmac_reg->CHANNEL[channel].DMAC_CHSTATUS;
-	ch_int_flag = dmac_reg->CHANNEL[channel].DMAC_CHINTFLAG;
+	ch_status = DMAC_CHSTATUS(dmac_reg,channel);
+	ch_int_flag = DMAC_CHINTFLAG(dmac_reg,channel);
 
 	/* Check if the channel is busy */
 	if ((ch_status & DMAC_CHSTATUS_BUSY_Msk) == DMAC_CHSTATUS_BUSY_Msk) {
