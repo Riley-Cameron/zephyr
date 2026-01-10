@@ -20,12 +20,14 @@
 #include <zephyr/irq.h>
 #include <zephyr/drivers/clock_control/mchp_clock_control.h>
 #include <string.h>
+#include <zephyr/logging/log.h>
 
 /******************************************************************************
  * @brief Devicetree definitions
  *****************************************************************************/
 #define DT_DRV_COMPAT microchip_sercom_g1_uart
 
+LOG_MODULE_REGISTER(uart_mchp_sercom_g1, CONFIG_UART_LOG_LEVEL);
 /******************************************************************************
  * @brief Macro definitions
  *****************************************************************************/
@@ -72,6 +74,26 @@
 #define UART_MCHP_IRQ_HANDLER(n)
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
+
+#if CONFIG_UART_ASYNC_API
+/* Used for building the device config struct. Grabs the DMA info. */
+#define MCHP_DT_INST_DMA_CTLR(n, name)                                                       	\
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas),                                                	\
+		    (DEVICE_DT_GET(DT_INST_DMAS_CTLR_BY_NAME(n, name))), (NULL))
+
+#define MCHP_DT_INST_DMA_CELL(n, name, cell)                                                  	\
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(n, dmas), (DT_INST_DMAS_CELL_BY_NAME(n, name, cell)),    	\
+		    (0xff))
+
+#define MCHP_UART_DMA_INIT(n)                                                                  	\
+	.dma_tx.dev = MCHP_DT_INST_DMA_CTLR(n, tx),                                               	\
+	.dma_tx.trg_id = MCHP_DT_INST_DMA_CELL(n, tx, trigsrc),                                    	\
+	.dma_rx.dev = MCHP_DT_INST_DMA_CTLR(n, rx),                                               	\
+	.dma_rx.trg_id = MCHP_DT_INST_DMA_CELL(n, rx, trigsrc),
+#else
+#define MCHP_UART_DMA_INIT(n)
+#endif
+
 /******************************************************************************
  * @brief Data type definitions
  *****************************************************************************/
@@ -96,6 +118,80 @@ typedef struct mchp_uart_clock {
 	.uart_clock.clock_dev = DEVICE_DT_GET(DT_NODELABEL(clock)),                                \
 	.uart_clock.mclk_sys = (void *)(DT_INST_CLOCKS_CELL_BY_NAME(n, mclk, subsystem)),          \
 	.uart_clock.gclk_sys = (void *)(DT_INST_CLOCKS_CELL_BY_NAME(n, gclk, subsystem)),
+
+#if CONFIG_UART_ASYNC_API
+
+/**
+ * @brief Structure containing async tx parameters
+ * 
+ */
+struct mchp_uart_async_tx {
+	/* DMA channel ID */
+	int dma_tx_ch;	
+	
+	/* Data buffer & length */ 
+	const uint8_t *buf;
+	size_t len;
+
+	/* TX busy flag */
+	bool busy;
+};
+
+/**
+ * @brief Structure containing async rx parameters
+ * 
+ */
+struct mchp_uart_async_rx {
+	/* DMA channel ID */
+	int dma_rx_ch;
+
+	/* DMA API configuration structures */
+	struct dma_block_config dma_blk;
+	struct dma_config dma_cfg;
+
+	/* Active data buffer & length */
+	uint8_t *buf;
+	size_t buf_len;
+
+	/* Replacemnt data buffer & length */
+	uint8_t *next_buf;
+	size_t next_buf_len;
+
+	/* Timer object used for RX timeout */
+	struct k_timer timer;
+
+	/* RX enabled flag */
+	bool enabled;
+};
+
+/**
+ * @brief Structure to hold DMA configuration info from the device tree
+ * 
+ */
+struct mchp_uart_dma_config {
+	/* DMA device */
+	const struct device *dev;
+
+	/* DMA trigger source ID */
+	uint32_t trg_id;
+};
+
+/**
+ * @brief Top level structure for async parameters
+ * 
+ */
+struct mchp_uart_async {
+	/* User callback - acts on the uart_event type that is passed in */
+	uart_callback_t user_cb;
+
+	/* User data - passed into callback */
+	void *user_data;
+
+	/* Async RX & TX structures */
+	struct mchp_uart_async_rx rx;
+	struct mchp_uart_async_tx tx;
+};
+#endif /* CONFIG_UART_ASYNC_API */
 
 /**
  * @brief UART device constant configuration structure.
@@ -133,6 +229,11 @@ typedef struct uart_mchp_dev_cfg {
 	/* Pin control configuration */
 	const struct pinctrl_dev_config *pcfg;
 
+#if CONFIG_UART_ASYNC_API
+	/* DMA configuration for async operations */
+	const struct mchp_uart_dma_config dma_rx;
+	const struct mchp_uart_dma_config dma_tx;
+#endif
 } uart_mchp_dev_cfg_t;
 
 /**
@@ -152,6 +253,11 @@ typedef struct uart_mchp_dev_data {
 	/* Cached status of TX completion */
 	bool is_tx_completed_cache;
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
+
+#ifdef CONFIG_UART_ASYNC_API
+	/* Top level async parameters struct */
+	struct mchp_uart_async async;
+#endif
 } uart_mchp_dev_data_t;
 
 /******************************************************************************
@@ -1125,6 +1231,31 @@ static int uart_mchp_init(const struct device *dev)
 		cfg->irq_config_func(dev);
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
+#if CONFIG_UART_ASYNC_API
+		/* Verify DMA device dependencies are ready */
+		if (!device_is_ready(cfg->dma_rx.dev) || !device_is_ready(cfg->dma_tx.dev)) {
+			retval = -ENODEV;
+			break;
+		}
+
+		/* Initialize the async parameters */
+		dev_data->async.user_data = NULL;
+		dev_data->async.user_cb = NULL;
+		dev_data->async.tx.dma_tx_ch = dma_request_channel(cfg->dma_tx.dev, NULL); //TODO: get this from device tree rather than dynamically?
+		dev_data->async.tx.busy = false;
+		dev_data->async.tx.len = 0;
+		dev_data->async.tx.buf = NULL;
+		dev_data->async.rx.dma_rx_ch = dma_request_channel(cfg->dma_rx.dev, NULL); //TODO: get this from device tree rather than dynamically?
+		dev_data->async.rx.enabled = false;
+		dev_data->async.rx.buf_len = 0;
+		dev_data->async.rx.buf = NULL;
+		
+		/* Check for invalid DMA channels */
+		if (dev_data->async.tx.dma_tx_ch < 0 || dev_data->async.rx.dma_rx_ch < 0) {
+			retval = -ENODEV;
+			break;
+		}
+#endif /* CONFIG_UART_ASYNC_API */
 		uart_enable(regs, clock_external, (cfg->run_in_standby_en == 1) ? true : false,
 			    true);
 	} while (0);
@@ -1591,10 +1722,507 @@ static void uart_mchp_irq_callback_set(const struct device *dev, uart_irq_callba
 
 #endif /* CONFIG_UART_INTERRUPT_DRIVEN */
 
+#if CONFIG_UART_ASYNC_API
+/* Helper Function Definitions */
+static void uart_mchp_tx_dma_cb(const struct device *dma_dev, void *user_data, uint32_t channel, int status);
+static int uart_mchp_rx_ready(const struct device *dev);
+static int uart_mchp_rx_start_dma(const struct device *dev);
+static void uart_mchp_rx_dma_cb(const struct device *dma_dev, void *user_data, uint32_t channel, int status);
+static void uart_mchp_rx_timeout_cb(struct k_timer *timer);
+
+
+/*
+* Async TX Functions
+*/
+
+/**
+ * @brief API handler for uart_callback_set function
+ * 
+ * Registers the user callback function for all async events as well as the user data.
+ * 
+ * @param dev - Pointer to the device structure
+ * @param callback - User callback function pointer
+ * @param user_data - User specified pointer
+ * @return int 
+ */
+static int uart_mchp_callback_set(const struct device *dev, uart_callback_t callback, void *user_data) {
+	uart_mchp_dev_data_t *data = dev->data;
+	data->async.user_cb = callback;
+	data->async.user_data = user_data;
+	return 0;
+}
+
+/**
+ * @brief API handler for uart_tx function
+ * 
+ * Sends given data out over the UART.
+ * 
+ * @param dev - Pointer to the device structure
+ * @param buf - User provided buffer containing the data to output
+ * @param len - Buffer size
+ * @param timeout - Unused
+ * @return int 
+ */
+int uart_mchp_tx(const struct device *dev, const uint8_t *buf, size_t len, int32_t timeout) {
+	const uart_mchp_dev_cfg_t *dev_cfg = dev->config;
+	uart_mchp_dev_data_t *data = dev->data;
+	sercom_registers_t *regs = dev_cfg->regs;
+	bool clock_external = dev_cfg->clock_external;
+	struct dma_config cfg = {0};
+	struct dma_block_config block = {0};
+	unsigned int key;
+	ARG_UNUSED(timeout); // TODO: implement timeout feature
+
+	/* Verify the data size is greater than zero */
+	if (len <= 0) {
+		return -EINVAL;
+	}
+
+	/* Disable interrupts */
+	key = irq_lock();
+
+	/* If TX transfer is already in progress, return an error */
+	if (data->async.tx.busy) {
+		irq_unlock(key);
+		return -EBUSY;
+	}
+
+	/* Set TX params */
+	data->async.tx.busy = true;
+	data->async.tx.buf = buf;
+	data->async.tx.len = len;
+
+	/* Enable interrupts */
+	irq_unlock(key);
+
+	/* DMA block initialization */
+	block.source_address = (uint32_t)buf;
+	if (!clock_external) {
+	    block.dest_address = (uint32_t)&regs->USART_INT.SERCOM_DATA;
+	} else {
+	    block.dest_address = (uint32_t)&regs->USART_EXT.SERCOM_DATA;
+	}
+	block.block_size = len;
+	block.source_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+	block.dest_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+
+	/* DMA config initialization */
+	cfg.channel_direction = MEMORY_TO_PERIPHERAL;
+	cfg.source_data_size = 1;
+	cfg.dest_data_size = 1;
+	cfg.source_burst_length = 1;
+	cfg.dest_burst_length = 1;
+	cfg.dma_callback = uart_mchp_tx_dma_cb;
+	cfg.user_data = (void *)dev; // Set the uart device as the user data
+	cfg.block_count = 1;
+	cfg.head_block = &block;
+	cfg.dma_slot = dev_cfg->dma_tx.trg_id;
+
+	/* Flush previous DMA config */
+	dma_stop(dev_cfg->dma_tx.dev, data->async.tx.dma_tx_ch);
+
+	/* Configure DMA Channel */
+	int ret = dma_config(dev_cfg->dma_tx.dev, data->async.tx.dma_tx_ch, &cfg);
+    if (ret) {
+        data->async.tx.busy = false;
+        return ret;
+    }
+
+	/* Start the DMA transfer */
+    ret = dma_start(dev_cfg->dma_tx.dev, data->async.tx.dma_tx_ch);
+    if (ret) {
+        data->async.tx.busy = false;
+        return ret;
+    }
+
+	return 0;
+}
+
+/**
+ * @brief API handler for uart_tx_abort function
+ * 
+ * Cancels an ongoing UART TX.
+ * 
+ * @param dev - Pointer to the device structure
+ * @return int 
+ */
+int uart_mchp_tx_abort(const struct device *dev) {
+	const uart_mchp_dev_cfg_t *cfg = dev->config;
+	uart_mchp_dev_data_t *data = dev->data;
+
+	/* Check if TX is already idle */
+	if (!data->async.tx.busy) {
+		return -EALREADY;
+	}
+
+	/* Cancel the DMA transfer */
+	dma_stop(cfg->dma_tx.dev, data->async.tx.dma_tx_ch);
+
+	/* Clear the busy flag */
+	data->async.tx.busy = false;
+
+	/* If there is a user callback registered, send an aborted event to the user */
+	if (data->async.user_cb) {
+		struct uart_event evt = {
+			.type = UART_TX_ABORTED,
+			.data.tx.buf = data->async.tx.buf,
+			.data.tx.len = data->async.tx.len,
+		};
+
+    	data->async.user_cb(dev, &evt, data->async.user_data);
+	}
+
+	return 0;
+}
+
+/**
+ * @brief Callback registered with the DMA API
+ * 
+ * Gets called on completion or failure of the TX DMA transfer. Triggers the user callback.
+ * 
+ * @param dma_dev - Pointer to the DMA device structure
+ * @param user_data - Pointer to the UART device structure
+ * @param channel - DMA channel ID
+ * @param status - Result of the DMA transfer
+ */
+static void uart_mchp_tx_dma_cb(const struct device *dma_dev, void *user_data, uint32_t channel, int status) {
+    struct device *uart_dev = user_data;
+    uart_mchp_dev_data_t *data = uart_dev->data;;
+
+	/* TX is no longer busy */
+    data->async.tx.busy = false;
+
+	/* If there is no user callback registered, return immediately */
+    if (!data->async.user_cb) {
+        return;
+    }
+
+	/* Create an event struct based on the results */
+    struct uart_event evt = {0};
+    if (status == 0) {
+        evt.type = UART_TX_DONE;
+        evt.data.tx.buf = data->async.tx.buf;
+        evt.data.tx.len = data->async.tx.len;
+    } else {
+        evt.type = UART_TX_ABORTED;
+        evt.data.tx.buf = data->async.tx.buf;
+        evt.data.tx.len = data->async.tx.len;
+    }
+
+	/* Pass the event back to the user through the callback */
+    data->async.user_cb(uart_dev, &evt, data->async.user_data);
+}
+
+
+/*
+* Async RX Functions
+*/
+
+/**
+ * @brief API handler for uart_rx_disable function
+ * 
+ * Disables asynchronous RX.
+ * 
+ * @param dev - Pointer to the device structure
+ * @return int 
+ */
+int uart_mchp_rx_disable(const struct device *dev) {
+	const uart_mchp_dev_cfg_t *cfg = dev->config;
+    uart_mchp_dev_data_t *data = dev->data;
+    sercom_registers_t *regs = cfg->regs;
+	bool clock_external = cfg->clock_external;
+
+	/* Check if already disabled */
+    if (!data->async.rx.enabled) {
+        return -EALREADY;
+    }
+
+	/* Clear enabled flag */
+    data->async.rx.enabled = false;
+
+	/* Cancel ongoing DMA transfer */
+    dma_stop(cfg->dma_rx.dev, data->async.rx.dma_rx_ch);
+
+	/* Stop the timeout timer */
+	k_timer_stop(&data->async.rx.timer);
+
+	/* Disable SERCOM RX */
+	if (clock_external) {
+		regs->USART_EXT.SERCOM_CTRLB &= ~SERCOM_USART_EXT_CTRLB_RXEN_Msk;
+    	while (regs->USART_EXT.SERCOM_SYNCBUSY & SERCOM_USART_EXT_SYNCBUSY_CTRLB_Msk);
+	} else {
+    	regs->USART_INT.SERCOM_CTRLB &= ~SERCOM_USART_INT_CTRLB_RXEN_Msk;
+    	while (regs->USART_INT.SERCOM_SYNCBUSY & SERCOM_USART_INT_SYNCBUSY_CTRLB_Msk);
+	}
+
+	/* Send user an RX disabled event */
+	struct uart_event evt = {0};
+	evt.type = UART_RX_DISABLED;
+    data->async.user_cb(dev, &evt, data->async.user_data);
+
+    return 0;
+}
+
+/**
+ * @brief API handler for uart_rx_enabled function
+ * 
+ * Enabled asynchronous RX.
+ * 
+ * @param dev - Pointer to the device structure
+ * @param buf - User provided buffer to fill with data
+ * @param len - Buffer size
+ * @param timeout - Time (in us) to wait before automatically passing the RX buffer to the user
+ * @return int 
+ */
+int uart_mchp_rx_enable(const struct device *dev, uint8_t *buf, size_t len, int32_t timeout) {
+	const uart_mchp_dev_cfg_t *cfg = dev->config;
+	uart_mchp_dev_data_t *data = dev->data;
+	sercom_registers_t *regs = cfg->regs;
+	bool clock_external = cfg->clock_external;
+
+	/* Confirm the buffer exists & has a length and timeout is not set to forever */
+	if (buf==NULL || len==0 || timeout == SYS_FOREVER_US) {
+		return -EINVAL;
+	}
+
+	/* Disabled interrupts and check enabled flag */
+	unsigned int key = irq_lock();
+	if (data->async.rx.enabled) {
+		irq_unlock(key);
+		return -EALREADY;
+	}
+
+	/* Assign rx parameters to the device struct members */
+	data->async.rx.enabled = true;
+    data->async.rx.buf = buf;
+    data->async.rx.buf_len = len;
+
+	/* Enabled interrupts */
+	irq_unlock(key);
+
+	/* Initialize the timeout timer */
+	k_timer_init(&data->async.rx.timer, uart_mchp_rx_timeout_cb, NULL);
+	k_timer_user_data_set(&data->async.rx.timer, (void *)dev); // Set the UART device as the timer's user data
+
+	/* Enable SERCOM RX */
+	if (clock_external) {
+		regs->USART_EXT.SERCOM_CTRLB |= SERCOM_USART_EXT_CTRLB_RXEN_Msk;
+    	while (regs->USART_EXT.SERCOM_SYNCBUSY & SERCOM_USART_EXT_SYNCBUSY_CTRLB_Msk);
+	} else {
+    	regs->USART_INT.SERCOM_CTRLB |= SERCOM_USART_INT_CTRLB_RXEN_Msk;
+    	while (regs->USART_INT.SERCOM_SYNCBUSY & SERCOM_USART_INT_SYNCBUSY_CTRLB_Msk);
+	}
+
+	/* Start the timer and the DMA transfer */
+	k_timer_start(&data->async.rx.timer, K_USEC(timeout), K_USEC(timeout));
+    return uart_mchp_rx_start_dma(dev);
+}
+
+/**
+ * @brief API handler for uart_rx_buf_rsp function
+ * 
+ * Provide a new buffer in response to the UART_RX_BUF_REQUEST event.
+ * 
+ * @param dev - Pointer to the device structure
+ * @param buf - User provided replacement buffer
+ * @param len - Buffer size
+ * @return int 
+ */
+int uart_mchp_rx_buf_rsp(const struct device *dev, uint8_t *buf, size_t	len) {
+	uart_mchp_dev_data_t *data = dev->data;
+
+	/* Check the enabled flag and make sure the new buffer is valid */
+    if (!data->async.rx.enabled || !buf || len == 0) {
+        return -EINVAL;
+    }
+
+	/* Disable interrupts */
+    unsigned int key = irq_lock();
+
+	/* Store the new buffer info */
+	data->async.rx.next_buf = buf;
+	data->async.rx.next_buf_len = len;
+
+	/* Enabled interrupts */
+	irq_unlock(key);
+
+    return 0;
+}
+
+/**
+ * @brief Helper function to pass received data to the user
+ * 
+ * Called by either the timer or DMA callback. Checks if there is data present, 
+ * sends it to the user through the user callback, and requests a new buffer.
+ * 
+ * @param dev - Pointer to the UART device structure
+ * @return int 
+ */
+static int uart_mchp_rx_ready(const struct device *dev) {
+	uart_mchp_dev_data_t *data = dev->data;
+	const uart_mchp_dev_cfg_t *cfg = dev->config;
+
+	/* Get DMA status to determine the size of RX data */
+	dma_stop(cfg->dma_rx.dev, data->async.rx.dma_rx_ch);
+	struct dma_status stat = {0};
+	dma_get_status(cfg->dma_rx.dev, data->async.rx.dma_rx_ch, &stat);
+	size_t current_received = data->async.rx.buf_len - stat.pending_length;
+
+	/* Check if there is any data */
+	if (current_received <= 0 || current_received > data->async.rx.buf_len) {
+		return uart_mchp_rx_start_dma(dev); // Don't invoke any user callbacks, just continue waiting for data
+	}
+
+	/* Report data */
+	struct uart_event evt = {0};
+	evt.type = UART_RX_RDY;
+	evt.data.rx.buf = data->async.rx.buf;
+	evt.data.rx.len = current_received;
+	evt.data.rx.offset = 0;
+	data->async.user_cb(dev, &evt, data->async.user_data);
+
+	/* Request new buffer */
+	evt.type = UART_RX_BUF_REQUEST;
+	evt.data.rx.buf = 0;
+	evt.data.rx.len = 0;
+	evt.data.rx.offset = 0;
+	data->async.user_cb(dev, &evt, data->async.user_data);
+
+	if (data->async.rx.next_buf != NULL) {
+		/* Swap in new buffer */
+		data->async.rx.buf = data->async.rx.next_buf;
+		data->async.rx.buf_len = data->async.rx.next_buf_len;
+		data->async.rx.next_buf = NULL;
+		data->async.rx.next_buf_len = 0;
+
+		/* Restart DMA with new buffer */
+		return uart_mchp_rx_start_dma(dev);
+	} else {
+		LOG_ERR("No Buffer Available");
+		return -EINVAL;
+	}
+}
+
+/**
+ * @brief Helper function to configure and begin a DMA transfer
+ * 
+ * Initiates a DMA transfer from the SERCOM_DATA register into the RX buffer.
+ * 
+ * @param dev - Pointer to the UART device structure
+ * @return int 
+ */
+static int uart_mchp_rx_start_dma(const struct device *dev) {
+	const uart_mchp_dev_cfg_t *cfg = dev->config;
+	uart_mchp_dev_data_t *data = dev->data;
+	sercom_registers_t *regs = cfg->regs;
+	bool clock_external = cfg->clock_external;
+
+	/* Ensure previous transfer is stopped (it should be stopped already)*/
+	dma_stop(cfg->dma_rx.dev, data->async.rx.dma_rx_ch);
+
+	/* Check if RX is enabled */
+	if (!data->async.rx.enabled) {
+		return -EACCES;
+	}
+
+	/* Initialize the DMA block struct */
+	struct dma_block_config *block = &data->async.rx.dma_blk;
+	memset(block, 0, sizeof(*block));
+	block->source_address = clock_external?(uint32_t)&regs->USART_EXT.SERCOM_DATA:(uint32_t)&regs->USART_INT.SERCOM_DATA;
+	block->dest_address = (uint32_t)data->async.rx.buf;
+	block->block_size = data->async.rx.buf_len;
+	block->source_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+	block->dest_addr_adj = DMA_ADDR_ADJ_INCREMENT;
+
+	/* Initialize the DMA config struct */
+	struct dma_config *dma_cfg = &data->async.rx.dma_cfg;
+	memset(dma_cfg, 0, sizeof(*dma_cfg));
+	dma_cfg->channel_direction = PERIPHERAL_TO_MEMORY;
+	dma_cfg->source_data_size = 1;
+	dma_cfg->dest_data_size = 1;
+	dma_cfg->source_burst_length = 1;
+	dma_cfg->dest_burst_length = 1;
+	dma_cfg->block_count = 1;
+	dma_cfg->head_block = block;
+	dma_cfg->dma_callback = uart_mchp_rx_dma_cb;
+	dma_cfg->user_data = (void *)dev;
+	dma_cfg->dma_slot = cfg->dma_rx.trg_id;
+
+	/* Configure & start the DMA transfer */
+    dma_config(cfg->dma_rx.dev, data->async.rx.dma_rx_ch, dma_cfg);
+    return dma_start(cfg->dma_rx.dev, data->async.rx.dma_rx_ch);
+}
+
+/**
+ * @brief Callback registered with the DMA API
+ * 
+ * Gets called on completion or failure of the RX DMA transfer.
+ * 
+ * @param dma_dev - Pointer to the DMA device structure
+ * @param user_data - Pointer to the UART device structure
+ * @param channel - DMA channel ID
+ * @param status - Result of the DMA transfer
+ */
+static void uart_mchp_rx_dma_cb(const struct device *dma_dev, void *user_data, uint32_t channel, int status) {
+    const struct device *uart_dev = user_data;
+    uart_mchp_dev_data_t *data = uart_dev->data;
+
+	/* Check if RX is enabled and if there is a registered user callback */
+    if (!data->async.rx.enabled || !data->async.user_cb) {
+        return;
+    }
+
+	/* If the DMA transfer failed disable RX */
+    if (status < 0) {
+        uart_mchp_rx_disable(uart_dev);
+		return;
+    }
+
+	/* If this DMA callback is reached it means the RX buffer is full so call the RX ready function */
+	int ret = uart_mchp_rx_ready(uart_dev);
+	if (ret) {
+		LOG_ERR("RX Ready Failed: %d", ret);
+	}
+}
+
+/**
+ * @brief Callback registered with the timeout timer API
+ * 
+ * Gets called each time the timer expires.
+ * 
+ * @param timer 
+ */
+static void uart_mchp_rx_timeout_cb(struct k_timer *timer) {
+	const struct device *dev = k_timer_user_data_get(timer);
+	uart_mchp_dev_data_t *data = dev->data;
+
+	/* Check if RX is enabled */
+	if (!data->async.rx.enabled) {
+		return;
+	}
+	
+	/* Call the RX ready function (there may or may not be data present) */
+	int ret = uart_mchp_rx_ready(dev);
+	if (ret) {
+		LOG_ERR("RX Ready Failed: %d", ret);
+	}
+}
+
+#endif /* CONFIG_UART_ASYNC_API */
+
 /******************************************************************************
  * @brief Zephyr driver instance creation
  *****************************************************************************/
 static DEVICE_API(uart, uart_mchp_driver_api) = {
+#ifdef CONFIG_UART_ASYNC_API
+	.callback_set = uart_mchp_callback_set,
+	.tx = uart_mchp_tx,
+	.tx_abort = uart_mchp_tx_abort,
+	.rx_enable = uart_mchp_rx_enable,
+	.rx_buf_rsp = uart_mchp_rx_buf_rsp,
+	.rx_disable = uart_mchp_rx_disable,
+#endif /* CONFIG_UART_ASYNC_API */
+
 #ifdef CONFIG_UART_USE_RUNTIME_CONFIGURE
 	.configure = uart_mchp_configure,
 	.config_get = uart_mchp_config_get,
@@ -1651,7 +2279,7 @@ static DEVICE_API(uart, uart_mchp_driver_api) = {
 		.txpo = (DT_INST_PROP(n, txpo)),                                                   \
 		.clock_external = DT_INST_PROP(n, clock_external),                                 \
 		.run_in_standby_en = DT_INST_PROP(n, run_in_standby_en),                           \
-		UART_MCHP_IRQ_HANDLER_FUNC(n) UART_MCHP_CLOCK_DEFN(n)}
+		UART_MCHP_IRQ_HANDLER_FUNC(n) UART_MCHP_CLOCK_DEFN(n) MCHP_UART_DMA_INIT(n)}
 
 #define UART_MCHP_DEVICE_INIT(n)                                                                   \
 	PINCTRL_DT_INST_DEFINE(n);                                                                 \
