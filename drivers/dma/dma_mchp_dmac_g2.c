@@ -162,7 +162,13 @@ static int dmac_desc_block_config(struct dma_block_config *block, void *desc_ptr
 
 	/* Set the block transfer count */
 	desc->DMAC_BTCNT = (uint16_t)(block->block_size / src_data_size);
-	desc->DMAC_DESCADDR = 0;
+	if (block->next_block == block) {
+        desc->DMAC_DESCADDR = (uint32_t)desc; // Loop back to this specific hardware descriptor
+    } else if (block->next_block != NULL) {
+        desc->DMAC_DESCADDR = 0; // Default to stop // TODO: Handle finding address to next block and storing here
+    } else {
+        desc->DMAC_DESCADDR = 0;
+    }
 
 	/* Set the source address */
 	switch (block->source_addr_adj) {
