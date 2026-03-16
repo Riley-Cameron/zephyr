@@ -15,6 +15,9 @@
 #include <fsl_ccm32k.h>
 #include <fsl_common.h>
 #include <fsl_clock.h>
+#include <fsl_cmc.h>
+
+#define MCXW7_CMC_ADDR (CMC_Type *)DT_REG_ADDR(DT_INST(0, nxp_cmc))
 
 extern uint32_t SystemCoreClock;
 extern void nxp_nbu_init(void);
@@ -36,6 +39,12 @@ extern void z_arm_pendsv(void);
 extern void sys_clock_isr(void);
 extern void z_arm_exc_spurious(void);
 
+#ifdef CONFIG_USE_SWITCH
+#define PENDSV_VEC z_arm_exc_spurious
+#else
+#define PENDSV_VEC z_arm_pendsv
+#endif
+
 __imx_boot_ivt_section void (*const image_vector_table[])(void) = {
 	(void (*)())(z_main_stack + CONFIG_MAIN_STACK_SIZE), /* 0x00 */
 	z_arm_reset,                                         /* 0x04 */
@@ -55,7 +64,7 @@ __imx_boot_ivt_section void (*const image_vector_table[])(void) = {
 	z_arm_svc,                                   /* 0x2C */
 	z_arm_debug_monitor,                         /* 0x30 */
 	(void (*)())((uintptr_t)image_vector_table), /* 0x34, imageLoadAddress. */
-	z_arm_pendsv,                                /* 0x38 */
+	PENDSV_VEC,                                /* 0x38 */
 #if defined(CONFIG_SYS_CLOCK_EXISTS) && defined(CONFIG_CORTEX_M_SYSTICK_INSTALL_ISR)
 	sys_clock_isr, /* 0x3C */
 #else
@@ -318,7 +327,7 @@ static int soc_nbu_init(void)
 {
 #if defined(CONFIG_NXP_NBU)
 	nxp_nbu_init();
-#else
+#elif defined(CONFIG_PM)
 	/* Shutdown NBU as not used */
 
 	/* Reset all RFMC registers and put the NBU CM3 in reset */
@@ -340,6 +349,11 @@ static int soc_nbu_init(void)
 	/* Force low power entry request to the radio domain */
 	RF_CMC1->RADIO_LP |= RF_CMC1_RADIO_LP_CK(0x2);
 	RFMC->RF2P4GHZ_CTRL |= RFMC_RF2P4GHZ_CTRL_LP_ENTER(0x1U);
+#endif
+#if !defined(CONFIG_SOC_MCXW716C)
+	/* Allow wakeup from the debugger */
+	RFMC->RF2P4GHZ_CFG |= RFMC_RF2P4GHZ_CFG_FORCE_DBG_PWRUP_ACK_MASK;
+	CMC_EnableDebugOperation(MCXW7_CMC_ADDR, true);
 #endif
 	return 0;
 }

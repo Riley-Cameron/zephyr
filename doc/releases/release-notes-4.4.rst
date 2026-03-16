@@ -46,6 +46,9 @@ The following CVEs are addressed by this release:
 * :cve:`2025-53022` `(TF-M) FWU does not check the length of the TLV’s payload
   <https://trustedfirmware-m.readthedocs.io/en/latest/security/security_advisories/fwu_tlv_payload_out_of_bounds_vulnerability.html>`_
 
+* :cve:`2026-1678` `Zephyr project bug tracker GHSA-536f-h63g-hj42
+  <https://github.com/zephyrproject-rtos/zephyr/security/advisories/GHSA-536f-h63g-hj42>`_
+
 API Changes
 ***********
 
@@ -103,6 +106,10 @@ Deprecated APIs and options
     * :c:macro:`BT_HCI_LE_SUPERVISON_TIMEOUT_MIN` and :c:macro:`BT_HCI_LE_SUPERVISON_TIMEOUT_MAX` have been deprecated.
       Use :c:macro:`BT_HCI_LE_SUPERVISION_TIMEOUT_MIN` and :c:macro:`BT_HCI_LE_SUPERVISION_TIMEOUT_MAX` instead.
 
+* Entropy
+
+   * :kconfig:option:`CONFIG_ENTROPY_PSA_CRYPTO_RNG` has been deprecated.
+
 * I2S
 
   * The following macros have been deprecated and are replaced with equivalent macros whose names
@@ -118,6 +125,12 @@ Deprecated APIs and options
 * POSIX
 
   * :kconfig:option:`CONFIG_XOPEN_STREAMS` was deprecated. Instead, use :kconfig:option:`CONFIG_XSI_STREAMS`
+
+* Random
+
+  * :kconfig:option:`CONFIG_CTR_DRBG_CSPRNG_GENERATOR` has been deprecrated. Instead, use
+    :kconfig:option:`CONFIG_PSA_CSPRNG_GENERATOR`.
+
 * Sensors
 
   * NXP
@@ -164,6 +177,7 @@ New APIs and options
     * :c:member:`bt_ccp_call_control_client_cb.user_data`
     * :kconfig:option:`CONFIG_BT_TBS_MAX_FRIENDLY_NAME_LENGTH`
     * :c:member:`bt_cap_handover_cb.unicast_to_broadcast_created`
+    * :c:func:`bt_tbs_client_get_by_index`
 
   * Host
 
@@ -306,6 +320,10 @@ New APIs and options
     select the voltage scale manually on STM32U5 series via Devicetree. This notably
     enables usage of the USB controller at lower system clock frequencies.
 
+* Random
+
+  * :kconfig:option:`CONFIG_PSA_CSPRNG_GENERATOR`
+
 * Settings
 
   * :kconfig:option:`CONFIG_SETTINGS_SAVE_SINGLE_SUBTREE_WITHOUT_MODIFICATION`
@@ -341,6 +359,7 @@ New APIs and options
   * :kconfig:option:`CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE`
   * :kconfig:option:`CONFIG_VIDEO_BUFFER_POOL_ZEPHYR_REGION`
   * :kconfig:option:`CONFIG_VIDEO_BUFFER_POOL_ZEPHYR_REGION_NAME`
+  * :c:func:`video_transform_cap`
 
 .. zephyr-keep-sorted-stop
 
@@ -393,6 +412,8 @@ New Drivers
 
   * Added new stm32 BSEC driver that provides means to program and read OTP fuses
     (:dtcompatible:`st,stm32-bsec`). (:github:`102403`)
+  * Added new driver that allows reading from OTP/read-only areas of STM32 embedded NVM
+    (:dtcompatible:`st,stm32-nvm-otp`) (:github:`102976`)
   * Added SiFli SF32LB eFuse OTP driver (:dtcompatible:`sifli,sf32lb-efuse`).
     (:github:`101926`)
   * :dtcompatible:`nxp,ocotp` (:github:`102567` & :github:`103089`)
@@ -403,6 +424,8 @@ New Samples
 * :zephyr:code-sample:`ble_peripheral_ans`
 * :zephyr:code-sample:`cpu_freq_pressure`
 * :zephyr:code-sample:`6dof_fifo_stream` (renamed from ``stream_fifo``)
+* :zephyr:code-sample:`accel_stream` (renamed from ``accel_polling``)
+* :zephyr:code-sample:`accel_polling` (it uses sensor_read() API)
 
 ..
   Same as above, this will also be recomputed at the time of the release.
@@ -411,11 +434,17 @@ New Samples
 DeviceTree
 **********
 
+* Migration guide: :ref:`migration_4.4_devicetree`
+* Bindings are no longer allowed to specify any default values for the
+  ``#address-cells`` and ``#size-cells`` properties.
 * :c:macro:`DT_CHILD_BY_UNIT_ADDR_INT`
 * :c:macro:`DT_INST_CHILD_BY_UNIT_ADDR_INT`
 
 Kernel
 ******
+
+* Dropped CONFIG_SCHED_DUMB and CONFIG_WAITQ_DUMB options which were deprecated
+  in Zephyr 4.2.0
 
 * :ref:`cleanup_api`
 
