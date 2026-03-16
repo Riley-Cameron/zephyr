@@ -37,7 +37,7 @@ manifest:
       remote: babblesim
       repo-path: base
       path: tools/bsim/components
-      revision: f65b51253f401591b0b734905ddb52b8d554a7d1
+      revision: 1cce925c72805cfdbb6341ca8c0755c7d42699d3
       groups:
         - babblesim
     - name: babblesim_ext_2G4_channel_NtNcable
@@ -112,7 +112,7 @@ manifest:
         - babblesim
     - name: bsim
       repo-path: babblesim-manifest
-      revision: dcf997c28b5cc2dc21ae876b64b31ff72b786210
+      revision: 7e10d556b5dd04360756cdf1f4b80d4f5bcac6cf
       path: tools/bsim
       groups:
         - babblesim
@@ -159,7 +159,7 @@ manifest:
       groups:
         - hal
     - name: hal_atmel
-      revision: 065e57c5013051c8b7f2256271349c6942bd9344
+      revision: 8cd575049f04131e333558072484bfc6334c19c4
       path: modules/hal/atmel
       groups:
         - hal
@@ -169,7 +169,7 @@ manifest:
       groups:
         - hal
     - name: hal_espressif
-      revision: 928f0184a9fd68e71c6fbd7e58b28dbbccd632aa
+      revision: dff4ebffee46789e6f2153bc1f6f655fd89a7963
       path: modules/hal/espressif
       west-commands: west/west-commands.yml
       groups:
@@ -200,7 +200,7 @@ manifest:
       groups:
         - hal
     - name: hal_nordic
-      revision: 4dea410729da817a464f778533eb721473262e5b
+      revision: 3e5403c9cc91fdfb11b6712ae9816674791f9f87
       path: modules/hal/nordic
       groups:
         - hal
@@ -210,7 +210,7 @@ manifest:
       groups:
         - hal
     - name: hal_nxp
-      revision: 4489753aff624df8af71c96b2bdbd31327cafbb9
+      revision: d12ee715e5f7297806b9c3289e1343899b93750f
       path: modules/hal/nxp
       groups:
         - hal
@@ -226,12 +226,12 @@ manifest:
         - hal
     - name: hal_realtek
       path: modules/hal/realtek
-      revision: f0192aa919dd5d16e68cf3a35fc73a1e51356215
+      revision: 5d482b1086d551f07ae331caae7f2b05029068fe
       groups:
         - hal
     - name: hal_renesas
       path: modules/hal/renesas
-      revision: ca896d22f176a5cea60d826d7d4ad75a14a7e401
+      revision: c92be1e7442b01e02d0f56a3b0ee090d8d068467
       groups:
         - hal
     - name: hal_rpi_pico
@@ -245,7 +245,7 @@ manifest:
       groups:
         - hal
     - name: hal_silabs
-      revision: d375743bceb892a12b8ce6a22d23438353d500cb
+      revision: aad92b8a992dbb8eecc5560d2a648d70c884ede5
       path: modules/hal/silabs
       groups:
         - hal
@@ -291,7 +291,7 @@ manifest:
         - hal
     - name: hostap
       path: modules/lib/hostap
-      revision: 8fa6fe8b1df12a727e86048f587161b241590ca0
+      revision: 9a7aef98c8758337b8b83d87ba64dc924769b67a
     - name: liblc3
       revision: 48bbd3eacd36e99a57317a0a4867002e0b09e183
       path: modules/lib/liblc3
@@ -318,7 +318,7 @@ manifest:
       revision: fb00b383072518c918e2258b0916c996f2d4eebe
       path: modules/lib/loramac-node
     - name: lvgl
-      revision: 94ae6c0535aa6ac4b08a75f4ae2c3a08cacb5c41
+      revision: 85aa60d18b3d5e5588d7b247abf90198f07c8a63
       path: modules/lib/gui/lvgl
     - name: mbedtls
       revision: c5b06d89c9c498d8fc8659ce31f7e53137b6270f
@@ -326,7 +326,7 @@ manifest:
       groups:
         - crypto
     - name: mcuboot
-      revision: d9c2ba153128efd7c16db9f36dea4ee69f63c7f5
+      revision: 6fc2d6b3b8bf86961fa066b828ff0b05c07a0c15
       path: bootloader/mcuboot
       groups:
         - bootloader
@@ -344,7 +344,7 @@ manifest:
       groups:
         - tools
     - name: nrf_hw_models
-      revision: cf40f6dc7fc441ee6848ea2e177c4522588c1b8c
+      revision: 2b09581c7654f4dfd38681270350c9ae6b0438a2
       path: modules/bsim_hw_models/nrf_hw_models
     - name: nrf_wifi
       revision: cebea8e27ceb91a7d4580d17db65f93669befe72
@@ -353,7 +353,7 @@ manifest:
       revision: 5efe7974f9546582e99f5a842a816ea4b65f5227
       path: modules/lib/open-amp
     - name: openthread
-      revision: 9a40380a47b2493cfcd172b362704581e9aef47f
+      revision: e4d97681c53ec1cc34af1404ad2960adda4ba691
       path: modules/lib/openthread
     - name: percepio
       path: modules/debug/percepio
@@ -381,7 +381,7 @@ manifest:
         - testing
         - tee
     - name: trusted-firmware-a
-      revision: 0a29cac8fe0f7bdb835b469d9ea11b8e17377a92
+      revision: 44bcc378b6ec4af8693d008f43983e488f1f5740
       path: modules/tee/tf-a/trusted-firmware-a
       groups:
         - tee
@@ -391,7 +391,7 @@ manifest:
       groups:
         - tee
     - name: uoscore-uedhoc
-      revision: e47f6465a96d12a54b875e5f6e5b2a203fb0d61d
+      revision: dc0ab6345450668de3f9597320a48c5a2d409bb6
       path: modules/lib/uoscore-uedhoc
     - name: zcbor
       revision: 9164bd18dcd88ff9d9ef98279501fc1093571017
