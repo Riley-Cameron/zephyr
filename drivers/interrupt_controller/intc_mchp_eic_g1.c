@@ -369,6 +369,68 @@ static int eic_mchp_init(const struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH
+
+#define EIC_LINES_MAX 16
+
+static void eic_mchp_isr(const struct device *dev)
+{
+	const struct eic_mchp_dev_cfg *eic_cfg = dev->config;
+	struct eic_mchp_dev_data *eic_data = dev->data;
+	uint32_t intflag = eic_cfg->regs->EIC_INTFLAG;
+
+	for (int line = 0; line < EIC_LINES_MAX; line++) {
+		if (!(intflag & BIT(line))) {
+			continue;
+		}
+		eic_cfg->regs->EIC_INTFLAG = BIT(line);
+
+		if (eic_data->eic_line_callback == NULL) {
+			continue;
+		}
+		uint8_t port_id = eic_data->lines[line].port;
+		uint32_t pins = BIT(eic_data->lines[line].pin);
+		eic_data->eic_line_callback(pins, eic_data->gpio_data[port_id]);
+	}
+}
+
+#define EIC_MCHP_DATA_DEFN(n)        static struct eic_mchp_dev_data eic_mchp_data_##n
+#define EIC_MCHP_IRQ_HANDLER_DECL(n) static void eic_irq_connect_##n(void)
+
+/* clang-format off */
+#define EIC_MCHP_IRQ_HANDLER(n)                                  \
+	static void eic_irq_connect_##n(void)                        \
+	{                                                             \
+		IRQ_CONNECT(DT_INST_IRQ_BY_IDX(n, 0, irq),              \
+			    DT_INST_IRQ_BY_IDX(n, 0, priority),             \
+			    eic_mchp_isr,                                    \
+			    DEVICE_DT_INST_GET(n), 0);                       \
+		irq_enable(DT_INST_IRQ_BY_IDX(n, 0, irq));              \
+	}
+
+#define EIC_MCHP_CLOCK_DEFN(n)                                                                  \
+	.eic_clock.clock_dev = DEVICE_DT_GET(DT_NODELABEL(clock)),                              \
+	.eic_clock.mclk_sys = (void *)DT_INST_CLOCKS_CELL_BY_NAME(n, mclk, subsystem),          \
+	.eic_clock.gclk_sys = (void *)DT_INST_CLOCKS_CELL_BY_NAME(n, gclk, subsystem)
+
+#define EIC_MCHP_CFG_DEFN(n)						\
+	static const struct eic_mchp_dev_cfg eic_mchp_dev_cfg_##n = {	\
+		.regs = (eic_registers_t *)DT_INST_REG_ADDR(n),		\
+		EIC_MCHP_CLOCK_DEFN(n),                                 \
+		.irq_config = eic_irq_connect_##n,                      \
+		.low_power_mode = DT_INST_PROP(n, low_power_mode)}
+
+#define EIC_MCHP_DEVICE_INIT(n)                                                                    \
+	EIC_MCHP_IRQ_HANDLER_DECL(n);                                                              \
+	EIC_MCHP_DATA_DEFN(n);                                                                     \
+	EIC_MCHP_CFG_DEFN(n);                                                                      \
+	DEVICE_DT_INST_DEFINE(n, eic_mchp_init, NULL, &eic_mchp_data_##n, &eic_mchp_dev_cfg_##n,  \
+			      PRE_KERNEL_1, CONFIG_INTC_INIT_PRIORITY, NULL);                      \
+	EIC_MCHP_IRQ_HANDLER(n)
+/* clang-format on */
+
+#else /* Original SAM path */
+
 #define EIC_MCHP_DATA_DEFN(n)        static struct eic_mchp_dev_data eic_mchp_data_##n
 #define EIC_MCHP_IRQ_HANDLER_DECL(n) static void eic_irq_connect_##n(void)
 #define EIC_MCHP_CREATE_HANDLERS(n)  LISTIFY(DT_NUM_IRQS(DT_DRV_INST(n)), EIC_MCHP_CB_INIT, (;),)
@@ -379,7 +441,7 @@ static int eic_mchp_init(const struct device *dev)
 	{										\
 		const struct eic_mchp_dev_cfg *eic_cfg = dev->config;			\
 		struct eic_mchp_dev_data *eic_data = dev->data;				\
-		uint8_t port_id = eic_data->lines[EIC_LINE_##eic_line].port ;		\
+		uint8_t port_id = eic_data->lines[EIC_LINE_##eic_line].port;		\
 											\
 		eic_cfg->regs->EIC_INTFLAG = BIT(EIC_LINE_##eic_line);			\
 		if (eic_data->eic_line_callback != NULL) {				\
@@ -434,5 +496,7 @@ static int eic_mchp_init(const struct device *dev)
 			      PRE_KERNEL_1, CONFIG_INTC_INIT_PRIORITY, NULL);                      \
 	EIC_MCHP_IRQ_HANDLER(n)
 /* clang-format on */
+
+#endif /* CONFIG_SOC_FAMILY_MICROCHIP_PIC32CM_JH */
 
 DT_INST_FOREACH_STATUS_OKAY(EIC_MCHP_DEVICE_INIT)
