@@ -1038,6 +1038,8 @@ static int nxp_wifi_connect(const struct device *dev, struct wifi_connect_req_pa
 			nxp_wlan_network.channel = 0;
 		} else {
 			nxp_wlan_network.channel = params->channel;
+			nxp_wlan_network.chan_list[0] = params->channel;
+			nxp_wlan_network.chan_list_len = 1;
 		}
 
 		if (params->mfp == WIFI_MFP_REQUIRED) {
@@ -1096,6 +1098,13 @@ static int nxp_wifi_connect(const struct device *dev, struct wifi_connect_req_pa
 	ret = wlan_add_network(&nxp_wlan_network);
 	if (ret != WM_SUCCESS) {
 		status = NXP_WIFI_RET_FAIL;
+	}
+
+	if (params->band != WIFI_FREQ_BAND_UNKNOWN) {
+		ret = wlan_set_network_chanlist(nxp_wlan_network.name, NULL, 0, params->band);
+		if (ret != WM_SUCCESS) {
+			status = NXP_WIFI_RET_FAIL;
+		}
 	}
 
 	ret = wlan_connect(nxp_wlan_network.name);
@@ -1533,7 +1542,7 @@ static void nxp_wifi_auto_connect(void)
 	params.psk_length = psk_len;
 
 	LOG_DBG("AutoConnect SSID[%s]", ssid);
-	nxp_wifi_connect(g_mlan.netif->if_dev->dev, &params);
+	nxp_wifi_connect(net_if_get_device(g_mlan.netif), &params);
 }
 #endif
 
@@ -2178,9 +2187,6 @@ static int nxp_wifi_set_config(const struct device *dev, enum ethernet_config_ty
 	switch (type) {
 	case ETHERNET_CONFIG_TYPE_MAC_ADDRESS:
 		memcpy(if_handle->mac_address, config->mac_address.addr, 6);
-
-		net_if_set_link_addr(if_handle->netif, if_handle->mac_address,
-				     sizeof(if_handle->mac_address), NET_LINK_ETHERNET);
 
 		if (if_handle->state.interface == WLAN_BSS_TYPE_STA) {
 			if (wlan_set_sta_mac_addr(if_handle->mac_address)) {

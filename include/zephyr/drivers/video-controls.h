@@ -152,6 +152,13 @@ enum video_colorfx {
  */
 #define VIDEO_CID_BAND_STOP_FILTER (VIDEO_CID_BASE + 33)
 
+/**
+ * @brief Rotate control
+ *
+ * Rotate the image by a given angle, e.g. 90, 180, 270 degree.
+ */
+#define VIDEO_CID_ROTATE (VIDEO_CID_BASE + 34)
+
 /** Sets the alpha color component.
  * Some devices produce data with a user-controllable alpha component. Set the value applied to
  * the alpha channel of every pixel produced.
@@ -283,6 +290,21 @@ enum video_exposure_type {
  * it one step further.
  */
 #define VIDEO_CID_IRIS_RELATIVE (VIDEO_CID_CAMERA_CLASS_BASE + 18)
+
+/**
+ * @brief Automatic exposure compensation.
+ *
+ * Determines the automatic exposure compensation. It is effective only when
+ * VIDEO_CID_EXPOSURE_AUTO control is set to AUTO, SHUTTER_PRIORITY, or
+ * APERTURE_PRIORITY. It is expressed in terms of EV; drivers should interpret
+ * the values as 0.001 EV units, where the value 1000 stands for +1 EV.
+ *
+ * Increasing the exposure compensation value is equivalent to decreasing the
+ * exposure value (EV) and will increase the amount of light at the image sensor.
+ * The camera performs the exposure compensation by adjusting absolute exposure
+ * time and/or aperture.
+ */
+#define VIDEO_CID_AUTO_EXPOSURE_BIAS (VIDEO_CID_CAMERA_CLASS_BASE + 19)
 
 /** Enables or disables the camera's wide dynamic range feature.
  * This feature allows to obtain clear images in situations where intensity of the illumination

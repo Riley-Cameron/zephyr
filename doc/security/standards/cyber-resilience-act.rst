@@ -392,7 +392,7 @@ include product-specific requirements for:
 * Firewalls (prEN 304 636)
 
 For the complete list of draft standards and participation in public consultations, see the
-`ETSI Cyber Resilience Act Portal <https://www.etsi.org/committee/1430-tc-cyber>`_.
+`ETSI Cyber Resilience Act Portal <https://docbox.etsi.org/cyber/CYBER/Open>`_.
 
 Educational resources
 =====================
@@ -402,7 +402,7 @@ Educational resources
 * `Linux Foundation CRA Readiness Report <https://www.linuxfoundation.org/research/cra-readiness>`_
 * `Linux Foundation CRA Compliance Best Practices
   <https://www.linuxfoundation.org/research/cra-compliance-best-practices>`_
-* `OpenSSF CRA Guidance <https://openssf.org/cra/>`_
+* `OpenSSF CRA Guidance <https://openssf.org/public-policy/eu-cyber-resilience-act/>`_
 
 Zephyr-specific resources
 =========================

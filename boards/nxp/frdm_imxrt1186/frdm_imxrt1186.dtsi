@@ -14,6 +14,7 @@
 		led1 = &red_led;
 		led2 = &green_led;
 		sw0 = &user_button;
+		eeprom-0 = &eeprom0;
 	};
 
 	chosen {
@@ -51,6 +52,21 @@
 	};
 };
 
+&edma3 {
+	status = "okay";
+};
+
+&edma4 {
+	status = "okay";
+};
+
+&lpspi2 {
+	status = "okay";
+	pinctrl-0 = <&pinmux_lpspi2>;
+	pinctrl-1 = <&pinmux_lpspi2_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
 &lpuart1 {
 	current-speed = <115200>;
 	pinctrl-0 = <&pinmux_lpuart1>;
@@ -63,6 +79,22 @@
 	pinctrl-0 = <&pinmux_lpuart3>;
 	pinctrl-1 = <&pinmux_lpuart3_sleep>;
 	pinctrl-names = "default", "sleep";
+};
+
+&lpi2c3 {
+	status = "okay";
+	pinctrl-0 = <&pinmux_lpi2c3>;
+	pinctrl-1 = <&pinmux_lpi2c3_sleep>;
+	pinctrl-names = "default", "sleep";
+
+	eeprom0: eeprom@50 {
+		compatible = "atmel,at24";
+		reg = <0x50>;
+		size = <4096>;
+		pagesize = <32>;
+		address-width = <16>;
+		timeout = <5>;
+	};
 };
 
 &gpio1 {
@@ -109,47 +141,58 @@
 	 * corresponding MPU settings.
 	 */
 	status = "disabled";
+	pinctrl-0 = <&pinmux_flexspi2>;
+	pinctrl-names = "default";
 	ahb-prefetch;
 	ahb-read-addr-opt;
 	rx-clock-source = <1>;
 
-	w25q128jv: w25q128jv@0 {
+	ext_flash_ctrl: flash-controller@0 {
 		compatible = "nxp,imx-flexspi-nor";
 		size = <DT_SIZE_M(16*8)>;
 		reg = <0>;
 		spi-max-frequency = <DT_FREQ_M(133)>;
 		status = "okay";
-		jedec-id = [ef 60 18];
-		erase-block-size = <DT_SIZE_K(4)>;
-		write-block-size = <1>;
+		jedec-id = [ef 40 18];
 
-		partitions {
-			compatible = "fixed-partitions";
-			#address-cells = <1>;
-			#size-cells = <1>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges = <0x0 0x04000000 DT_SIZE_M(16)>;
 
-			/*
-			 * Partition sizes must be aligned
-			 * to the flash memory sector size of 4KB.
-			 */
-			boot_partition: partition@0 {
-				label = "mcuboot";
-				reg = <0x00000000 DT_SIZE_K(128)>;
-			};
+		w25q128jv: flash@0 {
+			compatible = "soc-nv-flash";
+			reg = <0x0 DT_SIZE_M(16)>;
+			erase-block-size = <DT_SIZE_K(4)>;
+			write-block-size = <1>;
 
-			slot0_partition: partition@20000 {
-				label = "image-0";
-				reg = <0x00020000 DT_SIZE_M(7)>;
-			};
+			partitions {
+				compatible = "fixed-partitions";
+				#address-cells = <1>;
+				#size-cells = <1>;
 
-			slot1_partition: partition@720000 {
-				label = "image-1";
-				reg = <0x00720000 DT_SIZE_M(7)>;
-			};
+				/*
+				 * Partition sizes must be aligned
+				 * to the flash memory sector size of 4KB.
+				 */
+				boot_partition: partition@0 {
+					label = "mcuboot";
+					reg = <0x00000000 DT_SIZE_K(128)>;
+				};
 
-			storage_partition: partition@e20000 {
-				label = "storage";
-				reg = <0x00e20000 (DT_SIZE_M(2) - DT_SIZE_K(128))>;
+				slot0_partition: partition@20000 {
+					label = "image-0";
+					reg = <0x00020000 DT_SIZE_M(7)>;
+				};
+
+				slot1_partition: partition@720000 {
+					label = "image-1";
+					reg = <0x00720000 DT_SIZE_M(7)>;
+				};
+
+				storage_partition: partition@e20000 {
+					label = "storage";
+					reg = <0x00e20000 (DT_SIZE_M(2) - DT_SIZE_K(128))>;
+				};
 			};
 		};
 	};
@@ -158,4 +201,64 @@
 &lpadc1 {
 	pinctrl-0 = <&pinmux_lpadc1>;
 	pinctrl-names = "default";
+};
+
+&emdio {
+	pinctrl-0 = <&emdio_default>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	phy0: phy@5 {
+		compatible = "motorcomm,yt8531";
+		reg = <0x5>;
+		motorcomm,rx-delay-sel = <13>;
+		motorcomm,tx-delay-sel = <13>;
+		status = "okay";
+	};
+
+	phy2: phy@4 {
+		compatible = "motorcomm,yt8531";
+		reg = <0x4>;
+		motorcomm,rx-delay-sel = <13>;
+		motorcomm,tx-delay-sel = <13>;
+		status = "okay";
+	};
+};
+
+/* Internal port */
+&enetc_psi1 {
+	local-mac-address = [00 00 00 01 03 00];
+	status = "okay";
+};
+
+&netc_ptp_clock0 {
+	status = "okay";
+};
+
+&switch {
+	status = "okay";
+};
+
+&switch_port0 {
+	local-mac-address = [00 00 00 01 05 00];
+	pinctrl-0 = <&eth0_default>;
+	pinctrl-names = "default";
+	phy-handle = <&phy0>;
+	phy-connection-type = "rgmii";
+	status = "okay";
+};
+
+&switch_port2 {
+	local-mac-address = [00 00 00 01 07 00];
+	pinctrl-0 = <&eth2_default>;
+	pinctrl-names = "default";
+	phy-handle = <&phy2>;
+	phy-connection-type = "rgmii";
+	status = "okay";
+};
+
+/* Internal port connecting switch to CPU */
+&switch_port4 {
+	local-mac-address = [00 00 00 01 08 00];
+	status = "okay";
 };

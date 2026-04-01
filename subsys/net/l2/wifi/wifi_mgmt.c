@@ -17,6 +17,7 @@ LOG_MODULE_REGISTER(net_wifi_mgmt, CONFIG_NET_L2_WIFI_MGMT_LOG_LEVEL);
 #include <zephyr/toolchain.h>
 #include <zephyr/net/net_core.h>
 #include <zephyr/net/net_if.h>
+#include <zephyr/net/net_log.h>
 #include <zephyr/net/wifi_mgmt.h>
 #ifdef CONFIG_WIFI_NM
 #include <zephyr/net/wifi_nm.h>
@@ -1617,6 +1618,11 @@ void wifi_mgmt_raise_ap_sta_disconnected_event(struct net_if *iface,
 #if defined(CONFIG_WIFI_CREDENTIALS_STATIC)
 BUILD_ASSERT(sizeof(CONFIG_WIFI_CREDENTIALS_STATIC_SSID) != 1,
 	     "CONFIG_WIFI_CREDENTIALS_STATIC_SSID required");
+BUILD_ASSERT(sizeof(CONFIG_WIFI_CREDENTIALS_STATIC_SSID) - 1 <= WIFI_SSID_MAX_LEN,
+	     "CONFIG_WIFI_CREDENTIALS_STATIC_SSID too long");
+BUILD_ASSERT(sizeof(CONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD) - 1 <=
+		     WIFI_CREDENTIALS_MAX_PASSWORD_LEN,
+	     "CONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD too long");
 #endif /* defined(CONFIG_WIFI_CREDENTIALS_STATIC) */
 
 /**
@@ -1817,7 +1823,7 @@ static int add_static_network_config(struct net_if *iface)
 	       strlen(CONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD));
 
 	LOG_DBG("Adding statically configured WiFi network [%s] to internal list.",
-		creds.header.ssid);
+		CONFIG_WIFI_CREDENTIALS_STATIC_SSID);
 
 	return add_network_from_credentials_struct_personal(&creds, iface);
 #else

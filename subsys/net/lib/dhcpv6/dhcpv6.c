@@ -14,6 +14,7 @@ LOG_MODULE_REGISTER(net_dhcpv6, CONFIG_NET_DHCPV6_LOG_LEVEL);
 #include <zephyr/net/dhcpv6.h>
 #include <zephyr/net/dns_resolve.h>
 #include <zephyr/net/net_ip.h>
+#include <zephyr/net/net_log.h>
 #include <zephyr/random/random.h>
 #include <zephyr/sys/math_extras.h>
 
@@ -1833,6 +1834,9 @@ static int dhcpv6_handle_reply(struct net_if *iface, struct net_pkt *pkt,
 			net_dhcpv6_stop(iface);
 			return -EFAULT;
 		}
+
+		NET_INFO("Received: %s",
+			net_sprint_ipv6_addr(&ia_na.iaaddr.addr));
 	}
 
 prefix:

@@ -999,8 +999,8 @@ static uint8_t start_advertising(const void *cmd, uint16_t cmd_len,
 
 /**
  * Start directed advertising with a peer address with or without RPA.
- * If privacy is enabled and the peer does not support Central Address Resolution,
- * the advertisement will be started as undirected with RPA.
+ * If privacy is enabled and the peer does not support Central Address
+ * Resolution PTS expects IUT request to fail.
  */
 static uint8_t start_directed_advertising(const void *cmd, uint16_t cmd_len,
 					  void *rsp, uint16_t *rsp_len)
@@ -1010,35 +1010,49 @@ static uint8_t start_directed_advertising(const void *cmd, uint16_t cmd_len,
 	struct bt_le_adv_param adv_param = BT_LE_ADV_PARAM_INIT(
 		BT_LE_ADV_OPT_CONN, BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, NULL);
 	uint16_t options = sys_le16_to_cpu(cp->options);
+	bool peer_car_supported = false;
 
 	if (bt_addr_le_eq(&cp->address, &bt_addr_le_any)) {
 		LOG_ERR("Invalid peer address");
 		return BTP_STATUS_FAILED;
 	}
 
-	if (IS_ENABLED(CONFIG_BT_PRIVACY) && (options & BTP_GAP_START_DIRECTED_ADV_PEER_RPA)) {
-		/**
-		 * In accordance with the test spec for test case GAP/CONN/DCON/BV-05-C, if the peer
-		 * does not support Central Address Resolution, the advertisement will be started
-		 * as undirected.
-		 */
+	/*
+	 * For GAP/CONN/DCON/BV-05-C PTS expects IUT to fail operation
+	 * if the peer does not support Central Address Resolution.
+	 *
+	 * In Test Set there is ALT to start undirected advertising instead
+	 * but PTS interpretation is that IUT shall reject directed request
+	 * regardless and may then later on follow up with underected
+	 * advertising (which PTS doesn't validate). To keep this simple
+	 * just reject here.
+	 */
+	if ((options & BTP_GAP_START_DIRECTED_ADV_PEER_RPA) != 0U) {
+		if (!IS_ENABLED(CONFIG_BT_PRIVACY)) {
+			return BTP_STATUS_FAILED;
+		}
+
 		for (int i = 0; i < CONFIG_BT_MAX_PAIRED; i++) {
 			if (bt_addr_le_eq(&cp->address, &peers_with_car[i].addr) &&
 			    peers_with_car[i].supported) {
-				adv_param.options |= BT_LE_ADV_OPT_DIR_ADDR_RPA;
-				adv_param.peer = &cp->address;
-				if ((options & BTP_GAP_START_DIRECTED_ADV_HD) == 0U) {
-					adv_param.options |= BT_LE_ADV_OPT_DIR_MODE_LOW_DUTY;
-				}
+				peer_car_supported = true;
 				break;
 			}
 		}
-	} else {
-		adv_param.peer = &cp->address;
-		if ((options & BTP_GAP_START_DIRECTED_ADV_HD) == 0U) {
-			adv_param.options |= BT_LE_ADV_OPT_DIR_MODE_LOW_DUTY;
+
+		if (peer_car_supported == false) {
+			LOG_WRN("Peer doesn't support CAR");
+			return BTP_STATUS_FAILED;
 		}
+
+		adv_param.options |= BT_LE_ADV_OPT_DIR_ADDR_RPA;
 	}
+
+	if ((options & BTP_GAP_START_DIRECTED_ADV_HD) == 0U) {
+		adv_param.options |= BT_LE_ADV_OPT_DIR_MODE_LOW_DUTY;
+	}
+
+	adv_param.peer = &cp->address;
 
 	if (bt_le_adv_start(&adv_param, NULL, 0, NULL, 0) < 0) {
 		LOG_ERR("Failed to start advertising");
@@ -3075,6 +3089,36 @@ static uint8_t ead_decrypt_data(const void *cmd, uint16_t cmd_len, void *rsp, ui
 }
 #endif /* defined(CONFIG_BT_EAD) */
 
+#if defined(CONFIG_BT_SUBRATING)
+static uint8_t send_subrate_request(const void *cmd, uint16_t cmd_len, void *rsp, uint16_t *rsp_len)
+{
+	const struct btp_gap_send_subrate_request_cmd *cp = cmd;
+	struct bt_conn *conn;
+
+	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	if (conn == NULL) {
+		return BTP_STATUS_FAILED;
+	}
+
+	struct bt_conn_le_subrate_param param = {
+		.subrate_min = sys_le16_to_cpu(cp->subrate_min),
+		.subrate_max = sys_le16_to_cpu(cp->subrate_max),
+		.max_latency = sys_le16_to_cpu(cp->max_latency),
+		.continuation_number = sys_le16_to_cpu(cp->continuation_number),
+		.supervision_timeout = sys_le16_to_cpu(cp->supervision_timeout),
+	};
+
+	int err = bt_conn_le_subrate_request(conn, &param);
+
+	if (err != 0) {
+		LOG_ERR("Failed to send subrate request: %d", err);
+		return BTP_STATUS_FAILED;
+	}
+
+	return BTP_STATUS_SUCCESS;
+}
+#endif /* defined(CONFIG_BT_SUBRATING) */
+
 static const struct btp_handler handlers[] = {
 	{
 		.opcode = BTP_GAP_READ_SUPPORTED_COMMANDS,
@@ -3275,6 +3319,13 @@ static const struct btp_handler handlers[] = {
 		.func = set_rpa_timeout,
 	},
 #endif /* defined(CONFIG_BT_RPA_TIMEOUT_DYNAMIC) */
+#if defined(CONFIG_BT_SUBRATING)
+	{
+		.opcode = BTP_GAP_SEND_SUBRATE_REQUEST,
+		.expect_len = sizeof(struct btp_gap_send_subrate_request_cmd),
+		.func = send_subrate_request,
+	},
+#endif /* defined(CONFIG_BT_SUBRATING) */
 #if defined(CONFIG_BT_ISO_SYNC_RECEIVER)
 	{
 		.opcode = BTP_GAP_BIG_CREATE_SYNC,

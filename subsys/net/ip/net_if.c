@@ -20,6 +20,7 @@ LOG_MODULE_REGISTER(net_if, CONFIG_NET_IF_LOG_LEVEL);
 #include <zephyr/net/ipv4_autoconf.h>
 #include <zephyr/net/mld.h>
 #include <zephyr/net/net_core.h>
+#include <zephyr/net/net_log.h>
 #include <zephyr/net/net_event.h>
 #include <zephyr/net/net_pkt.h>
 #include <zephyr/net/net_if.h>
@@ -561,7 +562,7 @@ done:
 #endif /* CONFIG_NET_NATIVE */
 
 int net_if_set_link_addr_locked(struct net_if *iface,
-				uint8_t *addr, uint8_t len,
+				const uint8_t *addr, uint8_t len,
 				enum net_link_type type)
 {
 	int ret;

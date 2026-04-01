@@ -90,6 +90,7 @@ struct eth_renesas_ra_data {
 	rmac_instance_ctrl_t fsp_ctrl;
 	ether_cfg_t fsp_cfg;
 	ether_callback_args_t fsp_cb;
+	bool phy_link_up;
 };
 
 struct eth_renesas_ra_config {
@@ -114,19 +115,22 @@ static void phy_link_cb(const struct device *phy_dev, struct phy_link_state *sta
 	fsp_err_t fsp_err = FSP_SUCCESS;
 
 	if (!state->is_up) {
-		/* phy state change from up to down */
-		r_rmac_disable_reception(&data->fsp_ctrl);
+		if (data->phy_link_up == true) {
+			/* phy state change from up to down */
+			r_rmac_disable_reception(&data->fsp_ctrl);
+			data->phy_link_up = false;
 
-		data->fsp_ctrl.link_establish_status = ETHER_LINK_ESTABLISH_STATUS_DOWN;
+			data->fsp_ctrl.link_establish_status = ETHER_LINK_ESTABLISH_STATUS_DOWN;
 
-		LOG_DBG("Link down");
-		net_eth_carrier_off(data->iface);
+			LOG_DBG("Link down");
+			net_eth_carrier_off(data->iface);
+		}
 		return;
 	}
 
 	data->fsp_ctrl.link_establish_status = ETHER_LINK_ESTABLISH_STATUS_UP;
 
-	/* Chage ETHA to config mode */
+	/* Change ETHA to config mode */
 	r_rmac_phy_set_operation_mode(data->fsp_cfg.channel, RENESAS_RA_ETHA_DISABLE_MODE);
 	r_rmac_phy_set_operation_mode(data->fsp_cfg.channel, RENESAS_RA_ETHA_CONFIG_MODE);
 
@@ -151,7 +155,7 @@ static void phy_link_cb(const struct device *phy_dev, struct phy_link_state *sta
 		break;
 	}
 
-	/* Chage ETHA to operate mode */
+	/* Change ETHA to operate mode */
 	r_rmac_phy_set_operation_mode(data->fsp_cfg.channel, RENESAS_RA_ETHA_DISABLE_MODE);
 	r_rmac_phy_set_operation_mode(data->fsp_cfg.channel, RENESAS_RA_ETHA_OPERATION_MODE);
 
@@ -168,6 +172,7 @@ static void phy_link_cb(const struct device *phy_dev, struct phy_link_state *sta
 	LOG_DBG("Link up");
 
 	net_eth_carrier_on(data->iface);
+	data->phy_link_up = true;
 }
 
 static void eth_rmac_cb(ether_callback_args_t *args)
@@ -178,7 +183,7 @@ static void eth_rmac_cb(ether_callback_args_t *args)
 	switch (args->event) {
 #if defined(CONFIG_ETH_RENESAS_RA_USE_HW_WRITEBACK)
 	case ETHER_EVENT_TX_COMPLETE:
-		/* tx frame writen */
+		/* tx frame written */
 		k_sem_give(&data->tx_sem);
 		break;
 #endif

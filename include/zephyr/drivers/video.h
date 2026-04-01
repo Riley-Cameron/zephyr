@@ -19,7 +19,7 @@
  * @brief Interfaces for video devices.
  * @defgroup video_interface Video
  * @since 2.1
- * @version 1.2.0
+ * @version 1.3.0
  * @ingroup io_interfaces
  * @{
  */
@@ -46,9 +46,21 @@ struct video_control;
  */
 enum video_buf_type {
 	/** input buffer type */
-	VIDEO_BUF_TYPE_INPUT,
+	VIDEO_BUF_TYPE_INPUT = 1,
 	/** output buffer type */
-	VIDEO_BUF_TYPE_OUTPUT,
+	VIDEO_BUF_TYPE_OUTPUT = 2,
+};
+
+/**
+ * @brief video_buf_memory enum
+ *
+ * Memory type of a buffer
+ */
+enum video_buf_memory {
+	/** buffer is allocated from the internal video heap */
+	VIDEO_MEMORY_INTERNAL = 1,
+	/** buffer is allocated from outside */
+	VIDEO_MEMORY_EXTERNAL = 2,
 };
 
 /**
@@ -137,10 +149,12 @@ struct video_buffer {
 	void *driver_data;
 	/** type of the buffer */
 	enum video_buf_type type;
+	/** type of the buffer memory, see @ref video_buf_memory */
+	uint8_t memory;
 	/** pointer to the start of the buffer. */
 	uint8_t *buffer;
-	/** index of the buffer, optionally set by the application */
-	uint8_t index;
+	/** index of the buffer in the video buffer pool */
+	uint16_t index;
 	/** size of the buffer in bytes. */
 	uint32_t size;
 	/** number of bytes occupied by the valid data in the buffer. */
@@ -273,58 +287,49 @@ struct video_selection {
 };
 
 /**
- * @typedef video_api_format_t
- * @brief Function pointer type for video_set/get_format()
- *
- * See video_set/get_format() for argument descriptions.
+ * @def_driverbackendgroup{Video,video_interface}
+ * @{
+ */
+
+/**
+ * @brief Callback API to set or get video format.
+ * See @a video_set_format() and @a video_get_format() for argument description.
  */
 typedef int (*video_api_format_t)(const struct device *dev, struct video_format *fmt);
 
 /**
- * @typedef video_api_frmival_t
- * @brief Function pointer type for video_set/get_frmival()
- *
- * See video_set/get_frmival() for argument descriptions.
+ * @brief Callback API to set or get video frame interval.
+ * See @a video_set_frmival() and @a video_get_frmival() for argument description.
  */
 typedef int (*video_api_frmival_t)(const struct device *dev, struct video_frmival *frmival);
 
 /**
- * @typedef video_api_enum_frmival_t
- * @brief List all supported frame intervals of a given format
- *
- * See video_enum_frmival() for argument descriptions.
+ * @brief Callback API to enumerate supported frame intervals for a format.
+ * See @a video_enum_frmival() for argument description.
  */
 typedef int (*video_api_enum_frmival_t)(const struct device *dev, struct video_frmival_enum *fie);
 
 /**
- * @typedef video_api_enqueue_t
- * @brief Enqueue a buffer in the driver’s incoming queue.
- *
- * See video_enqueue() for argument descriptions.
+ * @brief Callback API to enqueue a buffer in the driver incoming queue.
+ * See @a video_enqueue() for argument description.
  */
 typedef int (*video_api_enqueue_t)(const struct device *dev, struct video_buffer *buf);
 
 /**
- * @typedef video_api_dequeue_t
- * @brief Dequeue a buffer from the driver’s outgoing queue.
- *
- * See video_dequeue() for argument descriptions.
+ * @brief Callback API to dequeue a buffer from the driver outgoing queue.
+ * See @a video_dequeue() for argument description.
  */
 typedef int (*video_api_dequeue_t)(const struct device *dev, struct video_buffer **buf,
 				   k_timeout_t timeout);
 
 /**
- * @typedef video_api_flush_t
- * @brief Flush endpoint buffers, buffer are moved from incoming queue to
- *        outgoing queue.
- *
- * See video_flush() for argument descriptions.
+ * @brief Callback API to flush endpoint buffers.
+ * See @a video_flush() for argument description.
  */
 typedef int (*video_api_flush_t)(const struct device *dev, bool cancel);
 
 /**
- * @typedef video_api_set_stream_t
- * @brief Start or stop streaming on the video device.
+ * @brief Callback API to start or stop streaming on the video device.
  *
  * Start (enable == true) or stop (enable == false) streaming on the video device.
  *
@@ -338,8 +343,7 @@ typedef int (*video_api_set_stream_t)(const struct device *dev, bool enable,
 				      enum video_buf_type type);
 
 /**
- * @typedef video_api_ctrl_t
- * @brief Set/Get a video control value.
+ * @brief Callback API to set or get a video control value.
  *
  * @param dev Pointer to the device structure.
  * @param cid Id of the control to set/get its value.
@@ -347,19 +351,14 @@ typedef int (*video_api_set_stream_t)(const struct device *dev, bool enable,
 typedef int (*video_api_ctrl_t)(const struct device *dev, uint32_t cid);
 
 /**
- * @typedef video_api_get_caps_t
- * @brief Get capabilities of a video endpoint.
- *
- * See video_get_caps() for argument descriptions.
+ * @brief Callback API to get capabilities of a video endpoint.
+ * See @a video_get_caps() for argument description.
  */
 typedef int (*video_api_get_caps_t)(const struct device *dev, struct video_caps *caps);
 
 /**
- * @typedef video_api_transform_cap_t
- * @brief Function pointer type for transforming a @ref video_format_cap from one end
- * to the other end of a m2m video device.
- *
- * See @ref video_transform_cap for argument descriptions.
+ * @brief Callback API to transform a format capability across m2m device endpoints.
+ * See @a video_transform_cap() for argument description.
  */
 typedef int (*video_api_transform_cap_t)(const struct device *const dev,
 					 const struct video_format_cap *const cap,
@@ -367,42 +366,89 @@ typedef int (*video_api_transform_cap_t)(const struct device *const dev,
 					 enum video_buf_type type, uint16_t ind);
 
 /**
- * @typedef video_api_set_signal_t
- * @brief Register/Unregister poll signal for buffer events.
- *
- * See video_set_signal() for argument descriptions.
+ * @brief Callback API to register or unregister poll signal for buffer events.
+ * See @a video_set_signal() for argument description.
  */
 typedef int (*video_api_set_signal_t)(const struct device *dev, struct k_poll_signal *sig);
 
 /**
- * @typedef video_api_selection_t
- * @brief Get/Set video selection (crop / compose)
- *
- * See @ref video_set_selection and @ref video_get_selection for argument descriptions.
+ * @brief Callback API to set or get video selection (crop/compose).
  */
 typedef int (*video_api_selection_t)(const struct device *dev, struct video_selection *sel);
 
+/**
+ * @driver_ops{Video}
+ */
 __subsystem struct video_driver_api {
-	/* mandatory callbacks */
+	/**
+	 * @driver_ops_mandatory @copybrief video_set_format
+	 */
 	video_api_format_t set_format;
+	/**
+	 * @driver_ops_mandatory @copybrief video_get_format
+	 */
 	video_api_format_t get_format;
+	/**
+	 * @driver_ops_mandatory @copybrief video_stream_start
+	 */
 	video_api_set_stream_t set_stream;
+	/**
+	 * @driver_ops_mandatory @copybrief video_get_caps
+	 */
 	video_api_get_caps_t get_caps;
-	/* optional callbacks */
+	/**
+	 * @driver_ops_optional @copybrief video_enqueue
+	 */
 	video_api_enqueue_t enqueue;
+	/**
+	 * @driver_ops_optional @copybrief video_dequeue
+	 */
 	video_api_dequeue_t dequeue;
+	/**
+	 * @driver_ops_optional @copybrief video_flush
+	 */
 	video_api_flush_t flush;
+	/**
+	 * @driver_ops_optional @copybrief video_set_ctrl
+	 */
 	video_api_ctrl_t set_ctrl;
+	/**
+	 * @driver_ops_optional @copybrief video_get_ctrl
+	 */
 	video_api_ctrl_t get_volatile_ctrl;
+	/**
+	 * @driver_ops_optional @copybrief video_set_signal
+	 */
 	video_api_set_signal_t set_signal;
+	/**
+	 * @driver_ops_optional @copybrief video_set_frmival
+	 */
 	video_api_frmival_t set_frmival;
+	/**
+	 * @driver_ops_optional @copybrief video_get_frmival
+	 */
 	video_api_frmival_t get_frmival;
+	/**
+	 * @driver_ops_optional @copybrief video_enum_frmival
+	 */
 	video_api_enum_frmival_t enum_frmival;
+	/**
+	 * @driver_ops_optional @copybrief video_set_selection
+	 */
 	video_api_selection_t set_selection;
+	/**
+	 * @driver_ops_optional @copybrief video_get_selection
+	 */
 	video_api_selection_t get_selection;
-	/** Transform capability from one end to the other end of an m2m device */
+	/**
+	 * @driver_ops_optional @copybrief video_transform_cap
+	 */
 	video_api_transform_cap_t transform_cap;
 };
+
+/**
+ * @}
+ */
 
 /**
  * @brief Set video format.
@@ -570,21 +616,7 @@ static inline int video_enum_frmival(const struct device *dev, struct video_frmi
  * @retval -EINVAL If parameters are invalid.
  * @retval -EIO General input / output error.
  */
-static inline int video_enqueue(const struct device *dev, struct video_buffer *buf)
-{
-	const struct video_driver_api *api = (const struct video_driver_api *)dev->api;
-
-	if (dev == NULL || buf == NULL || buf->buffer == NULL) {
-		return -EINVAL;
-	}
-
-	api = (const struct video_driver_api *)dev->api;
-	if (api->enqueue == NULL) {
-		return -ENOSYS;
-	}
-
-	return api->enqueue(dev, buf);
-}
+int video_enqueue(const struct device *dev, struct video_buffer *buf);
 
 /**
  * @brief Dequeue a video buffer.
@@ -976,8 +1008,10 @@ struct video_buffer *video_buffer_alloc(size_t size, k_timeout_t timeout);
  * @brief Release a video buffer.
  *
  * @param buf Pointer to the video buffer to release.
+ *
+ * @retval 0 on success or a negative errno on failure
  */
-void video_buffer_release(struct video_buffer *buf);
+int video_buffer_release(struct video_buffer *buf);
 
 /**
  * @brief Search for a format that matches in a list of capabilities
@@ -1015,9 +1049,9 @@ static inline uint64_t video_frmival_nsec(const struct video_frmival *frmival)
  * @param desired The frame interval for which find the closest match
  * @param match The resulting frame interval closest to @p desired
  */
-void video_closest_frmival_stepwise(const struct video_frmival_stepwise *stepwise,
-				    const struct video_frmival *desired,
-				    struct video_frmival *match);
+int video_closest_frmival_stepwise(const struct video_frmival_stepwise *stepwise,
+				   const struct video_frmival *desired,
+				   struct video_frmival *match);
 
 /**
  * @brief Find the closest match to a frame interval value within a video device.
@@ -1036,7 +1070,7 @@ void video_closest_frmival_stepwise(const struct video_frmival_stepwise *stepwis
  * @param dev Video device to query.
  * @param match Frame interval enumerator with the query, and loaded with the result.
  */
-void video_closest_frmival(const struct device *dev, struct video_frmival_enum *match);
+int video_closest_frmival(const struct device *dev, struct video_frmival_enum *match);
 
 /**
  * @brief Return the link-frequency advertised by a device
@@ -1168,40 +1202,89 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
  */
 
 /**
- * @code{.unparsed}
- *   0          1          2          3
- * | Bbbbbbbb | Gggggggg | Bbbbbbbb | Gggggggg | ...
- * | Gggggggg | Rrrrrrrr | Gggggggg | Rrrrrrrr | ...
- * @endcode
+ * @brief Repeat a macro for every Bayer format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
  */
-#define VIDEO_PIX_FMT_SBGGR8 VIDEO_FOURCC('B', 'A', '8', '1')
+#define VIDEO_FOREACH_BAYER(X, ...)						\
+	VIDEO_FOREACH_BAYER_PADDED(X, __VA_ARGS__)				\
+	VIDEO_FOREACH_BAYER_MIPI_PACKED(X, __VA_ARGS__)				\
+	VIDEO_FOREACH_BAYER_NON_PACKED(X, __VA_ARGS__)
 
 /**
- * @code{.unparsed}
- *   0          1          2          3
- * | Gggggggg | Bbbbbbbb | Gggggggg | Bbbbbbbb | ...
- * | Rrrrrrrr | Gggggggg | Rrrrrrrr | Gggggggg | ...
- * @endcode
+ * @brief Repeat a macro for every Bayer padded format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
  */
-#define VIDEO_PIX_FMT_SGBRG8 VIDEO_FOURCC('G', 'B', 'R', 'G')
+#define VIDEO_FOREACH_BAYER_PADDED(X, ...)					\
+	X(VIDEO_PIX_FMT_SBGGR8P16, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGBRG8P16, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGRBG8P16, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SRGGB8P16, __VA_ARGS__)
 
 /**
+ * 8-bit bayer format, split in two 4-bit blocks each zero-padded, little endian.
+ *
  * @code{.unparsed}
- *   0          1          2          3
- * | Gggggggg | Rrrrrrrr | Gggggggg | Rrrrrrrr | ...
- * | Bbbbbbbb | Gggggggg | Bbbbbbbb | Gggggggg | ...
+ *   0                   1                   2                   3
+ * | 0000bbbb 0000Bbbb | 0000gggg 0000Gggg | 0000gggg 0000Gggg | 0000rrrr 0000Rrrr | ...
  * @endcode
  */
-#define VIDEO_PIX_FMT_SGRBG8 VIDEO_FOURCC('G', 'R', 'B', 'G')
+#define VIDEO_PIX_FMT_SBGGR8P16 VIDEO_FOURCC('p', 'B', '8', '2')
 
 /**
+ * 8-bit bayer format, split in two 4-bit blocks each zero-padded, little endian.
+ *
  * @code{.unparsed}
- *   0          1          2          3
- * | Rrrrrrrr | Gggggggg | Rrrrrrrr | Gggggggg | ...
- * | Gggggggg | Bbbbbbbb | Gggggggg | Bbbbbbbb | ...
+ *   0                   1                   2                   3
+ * | 0000gggg 0000Gggg | 0000bbbb 0000Bbbb | 0000rrrr 0000Rrrr | 0000gggg 0000Gggg | ...
  * @endcode
  */
-#define VIDEO_PIX_FMT_SRGGB8 VIDEO_FOURCC('R', 'G', 'G', 'B')
+#define VIDEO_PIX_FMT_SGBRG8P16 VIDEO_FOURCC('p', 'G', '8', '2')
+
+/**
+ * 8-bit bayer format, split in two 4-bit blocks each zero-padded, little endian.
+ *
+ * @code{.unparsed}
+ *   0                   1                   2                   3
+ * | 0000gggg 0000Gggg | 0000rrrr 0000Rrrr | 0000bbbb 0000Bbbb | 0000gggg 0000Gggg | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_SGRBG8P16 VIDEO_FOURCC('p', 'g', '8', '2')
+
+/**
+ * 8-bit bayer format, split in two 4-bit blocks each zero-padded, little endian.
+ *
+ * @code{.unparsed}
+ *   0                   1                   2                   3
+ * | 0000rrrr 0000Rrrr | 0000gggg 0000Gggg | 0000gggg 0000Gggg | 0000bbbb 0000Bbbb | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_SRGGB8P16 VIDEO_FOURCC('p', 'R', '8', '2')
+
+/**
+ * @brief Repeat a macro for every Bayer MIPI-packed format, passed as first parameter
+ *
+ * A red, green, blue channel for every pixel, other than 8-bit per pixel.
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_BAYER_MIPI_PACKED(X, ...)					\
+	X(VIDEO_PIX_FMT_SBGGR10P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGBRG10P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGRBG10P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SRGGB10P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SBGGR12P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGBRG12P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGRBG12P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SRGGB12P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SBGGR14P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGBRG14P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGRBG14P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SRGGB14P, __VA_ARGS__)
 
 /**
  * @code{.unparsed}
@@ -1310,6 +1393,71 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
  * @endcode
  */
 #define VIDEO_PIX_FMT_SRGGB14P VIDEO_FOURCC('p', 'R', 'E', 'E')
+
+/**
+ * @brief Repeat a macro for every Bayer non-packed format, passed as first parameter
+ *
+ * A red, green, blue channel for every pixel, other than 8-bit per pixel.
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_BAYER_NON_PACKED(X, ...)					\
+	X(VIDEO_PIX_FMT_SBGGR8, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGBRG8, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGRBG8, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SRGGB8, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGBRG10, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGRBG10, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SRGGB10, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SBGGR12, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGBRG12, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGRBG12, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SRGGB12, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SBGGR14, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGBRG14, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGRBG14, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SRGGB14, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SBGGR16, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGBRG16, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SGRBG16, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_SRGGB16, __VA_ARGS__)
+
+/**
+ * @code{.unparsed}
+ *   0          1          2          3
+ * | Bbbbbbbb | Gggggggg | Bbbbbbbb | Gggggggg | ...
+ * | Gggggggg | Rrrrrrrr | Gggggggg | Rrrrrrrr | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_SBGGR8 VIDEO_FOURCC('B', 'A', '8', '1')
+
+/**
+ * @code{.unparsed}
+ *   0          1          2          3
+ * | Gggggggg | Bbbbbbbb | Gggggggg | Bbbbbbbb | ...
+ * | Rrrrrrrr | Gggggggg | Rrrrrrrr | Gggggggg | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_SGBRG8 VIDEO_FOURCC('G', 'B', 'R', 'G')
+
+/**
+ * @code{.unparsed}
+ *   0          1          2          3
+ * | Gggggggg | Rrrrrrrr | Gggggggg | Rrrrrrrr | ...
+ * | Bbbbbbbb | Gggggggg | Bbbbbbbb | Gggggggg | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_SGRBG8 VIDEO_FOURCC('G', 'R', 'B', 'G')
+
+/**
+ * @code{.unparsed}
+ *   0          1          2          3
+ * | Rrrrrrrr | Gggggggg | Rrrrrrrr | Gggggggg | ...
+ * | Gggggggg | Bbbbbbbb | Gggggggg | Bbbbbbbb | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_SRGGB8 VIDEO_FOURCC('R', 'G', 'G', 'B')
 
 /**
  * @code{.unparsed}
@@ -1456,6 +1604,32 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
  */
 
 /**
+ * @brief Repeat a macro for every grayscale format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_GRAYSCALE(X, ...)						\
+	VIDEO_FOREACH_GRAYSCALE_NON_PACKED(X, __VA_ARGS__)			\
+	VIDEO_FOREACH_GRAYSCALE_PADDED(X, __VA_ARGS__)				\
+	VIDEO_FOREACH_GRAYSCALE_MIPI_PACKED(X, __VA_ARGS__)
+
+/**
+ * @brief Repeat a macro for every grayscale non-packed format, passed as first parameter
+ *
+ * A red, green, blue channel for every pixel, other than 8-bit per pixel.
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_GRAYSCALE_NON_PACKED(X, ...)				\
+	X(VIDEO_PIX_FMT_GREY, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_Y10, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_Y12, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_Y14, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_Y16, __VA_ARGS__)
+
+/**
  * Same as Y8 (8-bit luma-only) following the standard FOURCC naming,
  * or L8 in some graphics libraries.
  *
@@ -1465,41 +1639,6 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
  * @endcode
  */
 #define VIDEO_PIX_FMT_GREY VIDEO_FOURCC('G', 'R', 'E', 'Y')
-
-
-/**
- * @code{.unparsed}
- *   0                   1                   2                   3
- * | 0000yyyy 0000Yyyy | 0000yyyy 0000Yyyy | 0000yyyy 0000Yyyy | 0000yyyy 0000Yyyy | ...
- * @endcode
- */
-#define VIDEO_PIX_FMT_Y4 VIDEO_FOURCC('Y', '0', '4', ' ')
-
-/**
- * @code{.unparsed}
- *   0          1          2          3          3 2 1 0
- * | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | yyyyyyyy | ...
- * @endcode
- */
-#define VIDEO_PIX_FMT_Y10P VIDEO_FOURCC('Y', '1', '0', 'P')
-
-/**
- * @code{.unparsed}
- *   0          1          1   0      2          3          3   2
- * | Yyyyyyyy | Yyyyyyyy | yyyyyyyy | Yyyyyyyy | Yyyyyyyy | yyyyyyyy | ...
- * | Yyyyyyyy | Yyyyyyyy | yyyyyyyy | Yyyyyyyy | Yyyyyyyy | yyyyyyyy | ...
- * @endcode
- */
-#define VIDEO_PIX_FMT_Y12P VIDEO_FOURCC('Y', '1', '2', 'P')
-
-/**
- * @code{.unparsed}
- *   0          1          2          3          1 0      2   1    3     2
- * | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | yyyyyyyy yyyyyyyy yyyyyyyy | ...
- * | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | yyyyyyyy yyyyyyyy yyyyyyyy | ...
- * @endcode
- */
-#define VIDEO_PIX_FMT_Y14P VIDEO_FOURCC('Y', '1', '4', 'P')
 
 /**
  * Little endian, with the 6 most significant bits set to Zero.
@@ -1542,6 +1681,62 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
 #define VIDEO_PIX_FMT_Y16 VIDEO_FOURCC('Y', '1', '6', ' ')
 
 /**
+ * @brief Repeat a macro for every grayscale padded format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_GRAYSCALE_PADDED(X, ...)					\
+	X(VIDEO_PIX_FMT_Y8P16, __VA_ARGS__)
+
+/**
+ * 8-bit luma-only split in two 4-bit blocks each zero-padded, little endian.
+ *
+ * @code{.unparsed}
+ *   0                   1                   2                   3
+ * | 0000yyyy 0000Yyyy | 0000yyyy 0000Yyyy | 0000yyyy 0000Yyyy | 0000yyyy 0000Yyyy | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_Y8P16 VIDEO_FOURCC('Y', '8', 'P', '2')
+
+/**
+ * @brief Repeat a macro for every grayscale MIPI-packed format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_GRAYSCALE_MIPI_PACKED(X, ...)				\
+	X(VIDEO_PIX_FMT_Y10P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_Y12P, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_Y14P, __VA_ARGS__)
+
+/**
+ * @code{.unparsed}
+ *   0          1          2          3          3 2 1 0
+ * | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | yyyyyyyy | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_Y10P VIDEO_FOURCC('Y', '1', '0', 'P')
+
+/**
+ * @code{.unparsed}
+ *   0          1          1   0      2          3          3   2
+ * | Yyyyyyyy | Yyyyyyyy | yyyyyyyy | Yyyyyyyy | Yyyyyyyy | yyyyyyyy | ...
+ * | Yyyyyyyy | Yyyyyyyy | yyyyyyyy | Yyyyyyyy | Yyyyyyyy | yyyyyyyy | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_Y12P VIDEO_FOURCC('Y', '1', '2', 'P')
+
+/**
+ * @code{.unparsed}
+ *   0          1          2          3          1 0      2   1    3     2
+ * | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | yyyyyyyy yyyyyyyy yyyyyyyy | ...
+ * | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | Yyyyyyyy | yyyyyyyy yyyyyyyy yyyyyyyy | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_Y14P VIDEO_FOURCC('Y', '1', '4', 'P')
+
+/**
  * @}
  */
 
@@ -1550,6 +1745,30 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
  * Per-color (R, G, B) channels.
  * @{
  */
+
+/**
+ * @brief Repeat a macro for every RGB format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_RGB(X, ...)						\
+	VIDEO_FOREACH_RGB_PACKED(X, __VA_ARGS__)				\
+	VIDEO_FOREACH_RGB_NON_PACKED(X, __VA_ARGS__)				\
+	VIDEO_FOREACH_RGB_ALPHA(X, __VA_ARGS__)					\
+	VIDEO_FOREACH_RGB_PADDED(X, __VA_ARGS__)
+
+/**
+ * @brief Repeat a macro for every RGB packed format, passed as first parameter
+ *
+ * A red, green, blue channel for every pixel, other than 8-bit per pixel.
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_RGB_PACKED(X, ...)					\
+	X(VIDEO_PIX_FMT_RGB565X, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_RGB565, __VA_ARGS__)
 
 /**
  * 5 red bits [15:11], 6 green bits [10:5], 5 blue bits [4:0].
@@ -1574,6 +1793,18 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
 #define VIDEO_PIX_FMT_RGB565 VIDEO_FOURCC('R', 'G', 'B', 'P')
 
 /**
+ * @brief Repeat a macro for every RGB non-packed format, passed as first parameter
+ *
+ * A red, green, blue channel for every pixel, 8-bit per pixel.
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_RGB_NON_PACKED(X, ...)					\
+	X(VIDEO_PIX_FMT_BGR24, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_RGB24, __VA_ARGS__)
+
+/**
  * 24 bit RGB format with 8 bit per component
  *
  * @code{.unparsed}
@@ -1592,36 +1823,69 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
 #define VIDEO_PIX_FMT_RGB24 VIDEO_FOURCC('R', 'G', 'B', '3')
 
 /**
+ * @brief Repeat a macro for every RGB alpha format, passed as first parameter
+ *
+ * A red, green, blue, alpha channel for every pixel.
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_RGB_ALPHA(X, ...)						\
+	X(VIDEO_PIX_FMT_ARGB32, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_ABGR32, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_RGBA32, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_BGRA32, __VA_ARGS__)
+
+/**
+ * The first byte is alpha (A) for each pixel.
+ *
  * @code{.unparsed}
  * | Aaaaaaaa Rrrrrrrr Gggggggg Bbbbbbbb | ...
  * @endcode
  */
-
 #define VIDEO_PIX_FMT_ARGB32 VIDEO_FOURCC('B', 'A', '2', '4')
 
 /**
+ * The last byte is alpha (A) for each pixel.
+ * *
+ * @warning Linux calls this format ABGR32 due to a historical typo
+ *
  * @code{.unparsed}
  * | Bbbbbbbb Gggggggg Rrrrrrrr Aaaaaaaa | ...
  * @endcode
  */
-
-#define VIDEO_PIX_FMT_ABGR32 VIDEO_FOURCC('A', 'R', '2', '4')
+#define VIDEO_PIX_FMT_BGRA32 VIDEO_FOURCC('A', 'R', '2', '4')
 
 /**
+ * The last byte is alpha (A) for each pixel.
+ *
  * @code{.unparsed}
  * | Rrrrrrrr Gggggggg Bbbbbbbb Aaaaaaaa | ...
  * @endcode
  */
-
 #define VIDEO_PIX_FMT_RGBA32 VIDEO_FOURCC('A', 'B', '2', '4')
 
 /**
+ * The first byte is alpha (A) for each pixel.
+ *
+ * @warning Linux calls this format BGRA32 due to a historical typo
+ *
  * @code{.unparsed}
  * | Aaaaaaaa Bbbbbbbb Gggggggg Rrrrrrrr | ...
  * @endcode
  */
+#define VIDEO_PIX_FMT_ABGR32 VIDEO_FOURCC('R', 'A', '2', '4')
 
-#define VIDEO_PIX_FMT_BGRA32 VIDEO_FOURCC('R', 'A', '2', '4')
+/**
+ * @brief Repeat a macro for every RGB padded format, passed as first parameter
+ *
+ * A red, green, blue channel for every pixel.
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_RGB_PADDED(X, ...)					\
+	X(VIDEO_PIX_FMT_XRGB32, __VA_ARGS__)
 
 /**
  * The first byte is empty (X) for each pixel.
@@ -1633,6 +1897,37 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
 #define VIDEO_PIX_FMT_XRGB32 VIDEO_FOURCC('B', 'X', '2', '4')
 
 /**
+ * The first byte is empty (X) for each pixel.
+ *
+ * @warning Linux calls this format BGRX32 due to a historical typo
+ *
+ * @code{.unparsed}
+ * | Xxxxxxxx Bbbbbbbb Gggggggg Rrrrrrrr | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_XBGR32 VIDEO_FOURCC('R', 'X', '2', '4')
+
+/**
+ * The last byte is empty (X) for each pixel.
+ *
+ * @warning Linux calls this format XBGR32 due to a historical typo
+ *
+ * @code{.unparsed}
+ * | Bbbbbbbb Gggggggg Rrrrrrrr Xxxxxxxx | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_BGRX32 VIDEO_FOURCC('X', 'R', '2', '4')
+
+/**
+ * The last byte is empty (X) for each pixel.
+ *
+ * @code{.unparsed}
+ * | Rrrrrrrr Gggggggg Bbbbbbbb Xxxxxxxx | ...
+ * @endcode
+ */
+#define VIDEO_PIX_FMT_RGBX32 VIDEO_FOURCC('X', 'B', '2', '4')
+
+/**
  * @}
  */
 
@@ -1641,6 +1936,31 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
  * Luminance (Y) and chrominance (U, V) channels.
  * @{
  */
+
+/**
+ * @brief Repeat a macro for every YUV format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_YUV(X, ...)						\
+	VIDEO_FOREACH_YUV_FULL_PLANAR(X, __VA_ARGS__)				\
+	VIDEO_FOREACH_YUV_NON_PLANAR(X, __VA_ARGS__)				\
+	VIDEO_FOREACH_YUV_SEMI_PLANAR(X, __VA_ARGS__)
+
+/**
+ * @brief Repeat a macro for every YUV Non-Planar format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_YUV_NON_PLANAR(X, ...)					\
+	X(VIDEO_PIX_FMT_YUYV, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_YVYU, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_VYUY, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_UYVY, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_YUV24, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_XYUV32, __VA_ARGS__)
 
 /**
  * There is either a missing channel per pixel, U or V.
@@ -1692,8 +2012,19 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
 #define VIDEO_PIX_FMT_YUV24 VIDEO_FOURCC('Y', 'U', 'V', '3')
 
 /**
- * Planar formats
+ * @brief Repeat a macro for every YUV Semi-Planar format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
  */
+#define VIDEO_FOREACH_YUV_SEMI_PLANAR(X, ...)					\
+	X(VIDEO_PIX_FMT_NV12, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_NV21, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_NV16, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_NV61, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_NV24, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_NV42, __VA_ARGS__)
+
 /**
  * Chroma (U/V) are subsampled horizontaly and vertically
  *
@@ -1848,6 +2179,16 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
 #define VIDEO_PIX_FMT_NV42 VIDEO_FOURCC('N', 'V', '4', '2')
 
 /**
+ * @brief Repeat a macro for every YUV Full-Planar format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_YUV_FULL_PLANAR(X, ...)					\
+	X(VIDEO_PIX_FMT_YUV420, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_YVU420, __VA_ARGS__)
+
+/**
  * Chroma (U/V) are subsampled horizontaly and vertically
  *
  * @code{.unparsed}
@@ -1915,6 +2256,18 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
  */
 
 /**
+ * @brief Repeat a macro for every compressed format, passed as first parameter
+ *
+ * @param X macro to replicate
+ * @param ... extra parameters
+ */
+#define VIDEO_FOREACH_COMPRESSED(X, ...)					\
+	X(VIDEO_PIX_FMT_JPEG, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_H264, __VA_ARGS__)					\
+	X(VIDEO_PIX_FMT_H264_NO_SC, __VA_ARGS__)				\
+	X(VIDEO_PIX_FMT_PNG, __VA_ARGS__)
+
+/**
  * Both JPEG (single frame) and Motion-JPEG (MJPEG, multiple JPEG frames concatenated)
  */
 #define VIDEO_PIX_FMT_JPEG VIDEO_FOURCC('J', 'P', 'E', 'G')
@@ -1937,6 +2290,84 @@ int video_transfer_buffer(const struct device *src, const struct device *sink,
 /**
  * @}
  */
+
+/** @cond INTERNAL_HIDDEN */
+#define _VIDEO_FMT_OR_EQ(pixfmt_a, pixfmt_b) || ((pixfmt_a) == (pixfmt_b))
+/** @endcond */
+
+/**
+ * @brief Test if a fourcc is a grayscale format
+ *
+ * @param pixfmt FourCC of the pixel format to test
+ * @return Whether the format is known to match this category
+ */
+#define VIDEO_FMT_IS_GRAYSCALE(pixfmt)						\
+	(0 VIDEO_FOREACH_GRAYSCALE(_VIDEO_FMT_OR_EQ, pixfmt))
+
+/**
+ * @brief Test if a fourcc is a Bayer format
+ *
+ * @param pixfmt FourCC of the pixel format to test
+ * @return Whether the format is known to match this category
+ */
+#define VIDEO_FMT_IS_BAYER(pixfmt)						\
+	(0 VIDEO_FOREACH_BAYER(_VIDEO_FMT_OR_EQ, pixfmt))
+
+/**
+ * @brief Test if a fourcc is an RGB format (bayer excluded)
+ *
+ * @param pixfmt FourCC of the pixel format to test
+ * @return Whether the format is known to match this category
+ */
+#define VIDEO_FMT_IS_RGB(pixfmt)						\
+	(0 VIDEO_FOREACH_RGB(_VIDEO_FMT_OR_EQ, pixfmt))
+
+/**
+ * @brief Test if a fourcc is an YUV format
+ *
+ * @param pixfmt FourCC of the pixel format to test
+ * @return Whether the format is known to match this category
+ */
+#define VIDEO_FMT_IS_YUV(pixfmt)						\
+	(0 VIDEO_FOREACH_YUV(_VIDEO_FMT_OR_EQ, pixfmt))
+
+/**
+ * @brief Test if a fourcc is any of the MIPI-packed formats
+ *
+ * @param pixfmt FourCC of the pixel format to test
+ * @return Whether the format is known to match this category
+ */
+#define VIDEO_FMT_IS_MIPI_PACKED(pixfmt)					\
+	(0 VIDEO_FOREACH_BAYER_MIPI_PACKED(_VIDEO_FMT_OR_EQ, pixfmt)		\
+	   VIDEO_FOREACH_GRAYSCALE_MIPI_PACKED(_VIDEO_FMT_OR_EQ, pixfmt))
+
+/**
+ * @brief Test if a fourcc is any of the MIPI-packed formats
+ *
+ * @param pixfmt FourCC of the pixel format to test
+ * @return Whether the format is known to match this category
+ */
+#define VIDEO_FMT_IS_PADDED(pixfmt)						\
+	(0 VIDEO_FOREACH_BAYER_PADDED(_VIDEO_FMT_OR_EQ, pixfmt)			\
+	   VIDEO_FOREACH_GRAYSCALE_PADDED(_VIDEO_FMT_OR_EQ, pixfmt))
+
+/**
+ * @brief Test if a fourcc is any of the semi-planar formats
+ *
+ * @param pixfmt FourCC of the pixel format to test
+ * @return Whether the format is known to match this category
+ */
+#define VIDEO_FMT_IS_SEMI_PLANAR(pixfmt)					\
+	(0 VIDEO_FOREACH_YUV_SEMI_PLANAR(_VIDEO_FMT_OR_EQ, pixfmt))
+
+/**
+ * @brief Test if a fourcc is any of the full-planar formats
+ *
+ * @param pixfmt FourCC of the pixel format to test
+ * @return Whether the format is known to match this category
+ */
+#define VIDEO_FMT_IS_FULL_PLANAR(pixfmt)					\
+	(0 VIDEO_FOREACH_YUV_FULL_PLANAR(_VIDEO_FMT_OR_EQ, pixfmt))
 
 /**
  * @brief Get number of bits per pixel of a pixel format
@@ -1982,6 +2413,10 @@ static inline unsigned int video_bits_per_pixel(uint32_t pixfmt)
 	case VIDEO_PIX_FMT_YVYU:
 	case VIDEO_PIX_FMT_UYVY:
 	case VIDEO_PIX_FMT_VYUY:
+	case VIDEO_PIX_FMT_SBGGR8P16:
+	case VIDEO_PIX_FMT_SGBRG8P16:
+	case VIDEO_PIX_FMT_SGRBG8P16:
+	case VIDEO_PIX_FMT_SRGGB8P16:
 	case VIDEO_PIX_FMT_SBGGR10:
 	case VIDEO_PIX_FMT_SGBRG10:
 	case VIDEO_PIX_FMT_SGRBG10:
@@ -1998,13 +2433,13 @@ static inline unsigned int video_bits_per_pixel(uint32_t pixfmt)
 	case VIDEO_PIX_FMT_SGBRG16:
 	case VIDEO_PIX_FMT_SGRBG16:
 	case VIDEO_PIX_FMT_SRGGB16:
+	case VIDEO_PIX_FMT_Y8P16:
 	case VIDEO_PIX_FMT_Y10:
 	case VIDEO_PIX_FMT_Y12:
 	case VIDEO_PIX_FMT_Y14:
 	case VIDEO_PIX_FMT_Y16:
 	case VIDEO_PIX_FMT_NV16:
 	case VIDEO_PIX_FMT_NV61:
-	case VIDEO_PIX_FMT_Y4:
 		return 16;
 	case VIDEO_PIX_FMT_BGR24:
 	case VIDEO_PIX_FMT_RGB24:
@@ -2012,12 +2447,15 @@ static inline unsigned int video_bits_per_pixel(uint32_t pixfmt)
 	case VIDEO_PIX_FMT_NV42:
 	case VIDEO_PIX_FMT_YUV24:
 		return 24;
-	case VIDEO_PIX_FMT_XRGB32:
 	case VIDEO_PIX_FMT_XYUV32:
 	case VIDEO_PIX_FMT_ARGB32:
 	case VIDEO_PIX_FMT_ABGR32:
 	case VIDEO_PIX_FMT_RGBA32:
 	case VIDEO_PIX_FMT_BGRA32:
+	case VIDEO_PIX_FMT_XRGB32:
+	case VIDEO_PIX_FMT_XBGR32:
+	case VIDEO_PIX_FMT_RGBX32:
+	case VIDEO_PIX_FMT_BGRX32:
 		return 32;
 	default:
 		/* Variable number of bits per pixel or unknown format */
